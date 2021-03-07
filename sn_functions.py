@@ -183,7 +183,8 @@ def prep_WTV_file(tnsfile, outputfile):
     return
 
 def process_WTV_results(all_tns, WTV_values, output_file):
-
+    """Returns a file only containing the WTV results where the sector observed
+    matches the sector of discovery"""
     just_sectors = all_tns["Sector"]
     #counter = 0
     WTV_confirmed =  pd.DataFrame(columns = all_tns.columns)

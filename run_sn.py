@@ -97,4 +97,4 @@ sn_list = sn.process_WTV_results(all_tns, WTV_values, wtv_check_output_file)
 
 #%% clean to only have Ia < 20 mags
 output = "C:/Users/conta/UROP/all_crosschecks/WTV_only_cleaned.csv"
-cleaned_targets = only_Ia_20th_mag(sn_list, output)
+cleaned_targets = sn.only_Ia_20th_mag(sn_list, output)
