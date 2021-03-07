@@ -39,18 +39,38 @@ import data_functions as df
 
   
 ####### CROSS MATCHING ######
+    
+def run_all_TNS_TESSCUT(savefolder, tessdates_csv, sector=1):
+    """ Runs cross_check_TNS_with_TESSCUT() for all sectors using the dates per
+    sector provided by TESS. Saves each file into the given save folder
+    Parameters:
+        - savefolder: where to save the output files
+        - tessdates_csv: path to the csv file from TESS of dates
+        - sector: sector to start at, defaults to sector 1
+        
+    **your file is "C:/Users/conta/Downloads/orbit_times_20201013_1338.csv" """
+    tessdates = pd.read_csv(tessdates_csv, skiprows = 5)
+    n = sector * 2 - 2
+    while n < len(tessdates):
+        start = tessdates["Start UTC"][n].split(" ")[0]
+        end = tessdates["End UTC"][n+1].split(" ")[0]
+        print(sector)
+        print(start, end)
+        info, obs = cross_check_TNS_with_TESSCUT(savefolder, sector, start, end)
+        sector += 1
+        n += 2
+    return
 
-def cross_check_TNS(savepath, sector, sector_start, sector_end):
-    """"
-    sector start/end like: "2020-11-10"
-    okay so this:
-        - retrieves the CSV file(s) with all the TNS targets for the date range
-        - saves that into a file
-        - opens and reads the file (pandas)
-        - runs each set of coordinates into Tesscut.getsectors()
-        - checks for ones that match and adds their information to a new CSV file of matches
-        - empty return
-        """
+def cross_check_TNS_with_TESSCUT(savepath, sector, sector_start, sector_end):
+    """" For a given sector's date range, retrieves the TNS results and then 
+    cross-matches all positions against TESSCUT. Saves only the ones that were 
+    observed during their discovery date. 
+    Parameters:
+        - savepath for output files
+        - sector being observed (int)
+        - sector_start: date to start search, format like "2020-11-10"
+        -sector_end: date to end search, same as above format
+    Returns: nothing. saved output csv's end in -crossmatched.csv """
     import tns_py as tns
     url = tns.CSV_URL(date_start = sector_start, date_end = sector_end,
                       classified_sne = True)
@@ -100,6 +120,96 @@ def cross_check_TNS(savepath, sector, sector_start, sector_end):
     observed_targets.to_csv(savefile)
             
     return info, observed_targets
+
+
+
+def compile_csvs(folder, suffix, savefilename = None, sector = False):
+    """Compile all TNS CSV's, including sector information as one of the columns in the output 
+    Parameters:
+        - folder: containing all tns csv files
+        - suffix: ending to search for on end of all files (probably -0.csv)
+        - savefilename: if not none, will save output of this into this file
+        - sector: if not false, save sector information into output list.
+        
+    Returns: concatenated pandas data frame containing all info from the csv files"""
+    all_info = pd.DataFrame()
+    for root, dirs, files in os.walk(folder):
+        for f in files:
+            if f.endswith((suffix)):
+                filepath = root  + f
+                p = pd.read_csv(filepath)
+                if sector:
+                    s = f.split("-")[1]
+                    p.rename(columns = {"Unnamed: 0": "Sector"}, inplace = True)
+                    p.rename(columns = {"index" : "Sector"}, inplace = True)
+                    p = p.assign(Sector = int(s))
+                
+                #print(p)
+                if all_info.empty:
+                    all_info = p
+                    #print("first loaded")
+                
+                else:
+                    all_info = pd.concat((all_info, p))
+                    #print("concatenated")
+                    
+    if savefilename is not None:
+        all_info.to_csv(folder + savefilename + ".csv", index=False)
+        
+    return all_info.reset_index()
+
+def prep_WTV_file(tnsfile, outputfile):
+    """This converts all RA and DEC in an input pandas-readable CSV file
+    from whatever format it currently is in into degrees and saves it into 
+    its own new csv file."""
+    #converting to decimal degrees
+    import pandas as pd
+    from astropy.coordinates import Angle
+    import astropy.units as u
+    df = pd.read_csv(tnsfile)
+    print (df)
+    
+    for n in range(len(df)):
+        a = Angle(df['RA'][n], u.degree)
+        a = a.degree
+        df['RA'][n] = a
+        b = Angle(df['DEC'][n], u.degree)
+        b = b.degree
+        df['DEC'][n] = b
+    
+    new = df[['RA', 'DEC']].copy()
+    print(new)
+    new.to_csv(outputfile, index = False)
+    return
+
+def process_WTV_results(all_tns, WTV_values, output_file):
+
+    just_sectors = all_tns["Sector"]
+    #counter = 0
+    WTV_confirmed =  pd.DataFrame(columns = all_tns.columns)
+    for n in range(len(WTV_values) - 1):
+        correct_sector = just_sectors[n]
+        columnname = "S" + str(correct_sector)
+        if WTV_values[columnname][n] != 0.0: 
+            WTV_confirmed = WTV_confirmed.append(all_tns.iloc[[n]])
+            
+    WTV_confirmed.reset_index(inplace = True, drop=True)   
+    del WTV_confirmed['index']     
+    WTV_confirmed.to_csv(output_file, index=False)
+    return WTV_confirmed
+
+def only_Ia_20th_mag(sn_list, output):
+    """Clears out all sn from a list that are not Ia and brighter than 20th magnitude
+    at time of detection"""
+    cleaned_targets = pd.DataFrame(columns = sn_list.columns)
+    for n in range(len(sn_list) -1):
+        if sn_list["Obj. Type"][n] == "SN Ia" and sn_list["Discovery Mag/Flux"][n] <= 20:
+            cleaned_targets = cleaned_targets.append(sn_list.iloc[[n]])
+            
+    cleaned_targets.reset_index(inplace = True, drop=True)   
+    #del cleaned_targets['index']     
+    cleaned_targets.to_csv(output, index=False)
+    return cleaned_targets
 
 def retrieve_all_TNS_and_NED(savepath, SN_list):
     """"For a given list of SN, retrieves the TNS information
