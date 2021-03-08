@@ -75,11 +75,12 @@ wtv_check_output_file = folder + "WTV_TESSCUT_double_confirmed.csv"
 WTV_values = pd.read_csv("C:/Users/conta/UROP/all_crosschecks/wtv-WTV_tns_tesscut_upload.csv", skiprows = 61)  
 sn.process_WTV_results(all_tns_tesscut, WTV_values, wtv_check_output_file)
 
-#%% worthwhile to also run on ENTIRE TNS list pre-TESSCUT run as well:
+#%% RUN ON ENTIRE LIST on ENTIRE TNS list pre-TESSCUT run as well:
 
 savefilename = "all_tns_results"  
 folder = "C:/Users/conta/UROP/all_crosschecks/"
-all_tns = sn.compile_csvs(folder, "-0.csv",
+openfolder = folder + "TNS_files/"
+all_tns = sn.compile_csvs(openfolder, "-0.csv",
                           savefilename = savefilename, sector = True)
 #%%
 tns_file = "C:/Users/conta/UROP/all_crosschecks/all_tns_results.csv"
@@ -97,4 +98,4 @@ sn_list = sn.process_WTV_results(all_tns, WTV_values, wtv_check_output_file)
 
 #%% clean to only have Ia < 20 mags
 output = "C:/Users/conta/UROP/all_crosschecks/WTV_only_cleaned.csv"
-cleaned_targets = sn.only_Ia_20th_mag(sn_list, output)
+cleaned_targets = sn.only_Ia_22_mag(sn_list, output)

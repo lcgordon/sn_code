@@ -34,8 +34,7 @@ import scipy.signal as signal
 from astropy.stats import SigmaClip
 from astropy.utils import exceptions
 
-import data_access as da
-import data_functions as df
+import data_utils as du
 
   
 ####### CROSS MATCHING ######
@@ -184,33 +183,50 @@ def prep_WTV_file(tnsfile, outputfile):
 
 def process_WTV_results(all_tns, WTV_values, output_file):
     """Returns a file only containing the WTV results where the sector observed
-    matches the sector of discovery"""
+    matches the sector of discovery OR the prior sector"""
     just_sectors = all_tns["Sector"]
     #counter = 0
     WTV_confirmed =  pd.DataFrame(columns = all_tns.columns)
     for n in range(len(WTV_values) - 1):
         correct_sector = just_sectors[n]
         columnname = "S" + str(correct_sector)
-        if WTV_values[columnname][n] != 0.0: 
-            WTV_confirmed = WTV_confirmed.append(all_tns.iloc[[n]])
+        prior_sector = correct_sector - 1
+        priorname = "S" + str(prior_sector)
+        next_sector = correct_sector + 1
+        nextname = "S" + str(next_sector)
+        if correct_sector != 1:
+            if WTV_values[columnname][n] != 0.0 or WTV_values[nextname][n] != 0.0 or WTV_values[priorname][n] != 0.0: 
+                #THE MINUS ONE MAKES A CORRECTION FOR THE WEIRD FIRST EMPTY LINE IN WTV FILES
+                WTV_confirmed = WTV_confirmed.append(all_tns.iloc[[(n-1)]])
+        else:
+            if WTV_values[columnname][n] != 0.0 or WTV_values[nextname][n] != 0.0: 
+                #THE MINUS ONE MAKES A CORRECTION FOR THE WEIRD FIRST EMPTY LINE IN WTV FILES
+                WTV_confirmed = WTV_confirmed.append(all_tns.iloc[[(n-1)]])
             
     WTV_confirmed.reset_index(inplace = True, drop=True)   
     del WTV_confirmed['index']     
     WTV_confirmed.to_csv(output_file, index=False)
     return WTV_confirmed
 
-def only_Ia_20th_mag(sn_list, output):
-    """Clears out all sn from a list that are not Ia and brighter than 20th magnitude
+def only_Ia_22_mag(sn_list, output):
+    """Clears out all sn from a list that are not Ia and brighter than 22nd magnitude
     at time of detection"""
     cleaned_targets = pd.DataFrame(columns = sn_list.columns)
     for n in range(len(sn_list) -1):
-        if sn_list["Obj. Type"][n] == "SN Ia" and sn_list["Discovery Mag/Flux"][n] <= 20:
+        if sn_list["Obj. Type"][n] == "SN Ia" and sn_list["Discovery Mag/Flux"][n] <= 22:
             cleaned_targets = cleaned_targets.append(sn_list.iloc[[n]])
             
     cleaned_targets.reset_index(inplace = True, drop=True)   
     #del cleaned_targets['index']     
     cleaned_targets.to_csv(output, index=False)
     return cleaned_targets
+
+def produce_lygos_list(sn_list, output):
+    """Saves just target names + RA/DEC values """
+    correct_cols = sn_list[["Name","RA", "DEC"]].copy()
+    correct_cols.to_csv(output, index=False)
+    return correct_cols
+
 
 def retrieve_all_TNS_and_NED(savepath, SN_list):
     """"For a given list of SN, retrieves the TNS information
@@ -262,6 +278,7 @@ def retrieve_all_TNS_and_NED(savepath, SN_list):
 
 ############ HELPER FUNCTIONS ####################
 def conv_lygos_to_mag(i, galmag):
+    #http://www.astro.ucla.edu/~wright/CosmoCalc.html
     if galmag > 19.0 or galmag is None:
         galmag = 19.0
         
