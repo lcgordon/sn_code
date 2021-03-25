@@ -55,47 +55,58 @@ import sn_functions as sn
 folder = "C:/Users/conta/UROP/all_crosschecks/"
 tessdates_csv = "C:/Users/conta/Downloads/orbit_times_20201013_1338.csv"
 sn.run_all_TNS_TESSCUT(folder, tessdates_csv, sector=1)
-#%% concatenate all individual sectors together, saving sector information.
+#%% RUNNING WITH TESSCUT
 
-savefilename = "all_tns_tesscut_results"       
-all_tns_tesscut = sn.compile_csvs(folder, "-crossmatched.csv",
-                          savefilename = savefilename, sector = True)
-#%% Convert to degrees for WTV upload
+#savefilename = "all_tns_tesscut_results"       
+#all_tns_tesscut = sn.compile_csvs(folder, "-crossmatched.csv",
+ #                         savefilename = savefilename, sector = True)
+# Convert to degrees for WTV upload
 
-tns_file = "C:/Users/conta/UROP/all_crosschecks/all_tns_tesscut_results.csv"
-output_file = "C:/Users/conta/UROP/all_crosschecks/WTV_tns_tesscut_upload.csv"
+#tns_file = "C:/Users/conta/UROP/all_crosschecks/all_tns_tesscut_results.csv"
+#output_file = "C:/Users/conta/UROP/all_crosschecks/WTV_tns_tesscut_upload.csv"
 
-sn.prep_WTV_file(tns_file, output_file)
+#sn.prep_WTV_file(tns_file, output_file)
 
-#%% Then you have to upload that file into the WTV webpage, 
-#https://heasarc.gsfc.nasa.gov/cgi-bin/tess/webtess/wtv.py
-#and save the resulting CSV file. 
-#%% Run output WTV file through all the correct sectors you're looking for data in
-wtv_check_output_file = folder + "WTV_TESSCUT_double_confirmed.csv"
-WTV_values = pd.read_csv("C:/Users/conta/UROP/all_crosschecks/wtv-WTV_tns_tesscut_upload.csv", skiprows = 61)  
-sn.process_WTV_results(all_tns_tesscut, WTV_values, wtv_check_output_file)
-
-#%% RUN ON ENTIRE LIST on ENTIRE TNS list pre-TESSCUT run as well:
-
-savefilename = "all_tns_results"  
-folder = "C:/Users/conta/UROP/all_crosschecks/"
-openfolder = folder + "TNS_files/"
-all_tns = sn.compile_csvs(openfolder, "-0.csv",
-                          savefilename = savefilename, sector = True)
-#%%
-tns_file = "C:/Users/conta/UROP/all_crosschecks/all_tns_results.csv"
-output_file = "C:/Users/conta/UROP/all_crosschecks/WTV_tns_upload.csv"
-
-sn.prep_WTV_file(tns_file, output_file)
-
-#%% Then you have to upload that file into the WTV webpage, 
+# Then you have to upload that file into the WTV webpage, 
 #https://heasarc.gsfc.nasa.gov/cgi-bin/tess/webtess/wtv.py
 #and save the resulting CSV file. 
 # Run output WTV file through all the correct sectors you're looking for data in
-wtv_check_output_file = "C:/Users/conta/UROP/all_crosschecks/WTV_only_crossmatch.csv"
-WTV_values = pd.read_csv("C:/Users/conta/UROP/all_crosschecks/wtv-WTV_tns_upload.csv", skiprows = 61)  
-sn_list = sn.process_WTV_results(all_tns, WTV_values, wtv_check_output_file)
+#wtv_check_output_file = folder + "WTV_TESSCUT_double_confirmed.csv"
+#WTV_values = pd.read_csv("C:/Users/conta/UROP/all_crosschecks/wtv-WTV_tns_tesscut_upload.csv", skiprows = 61)  
+#sn.process_WTV_results(all_tns_tesscut, WTV_values, wtv_check_output_file)
 
-#%% clean to only have Ia < 20 mags
-output = "C:/Users/conta/UROP/all_crosschecks/WTV_only_cleaned.csv"
-cleaned_targets = sn.only_Ia_22_mag(sn_list, output)
+#%% RUN ON ENTIRE LIST on ENTIRE TNS list:
+savefilename = "all_tns_results"  
+folder = "C:/Users/conta/UROP/all_crosschecks/"
+openfolder = folder + "TNS_files/"
+full_tns = sn.compile_csvs(openfolder, "-0.csv",
+                          savefilename = savefilename, sector = True)
+#cross clean to remove any too faint or not-Ia's
+output = "C:/Users/conta/UROP/all_crosschecks/exp/cleaned_tns.csv"
+sn_list_cleaned = sn.only_Ia_22_mag(full_tns, output)
+
+wtv_prep = "C:/Users/conta/UROP/all_crosschecks/exp/wtv_input.csv"
+sn.prep_WTV_file(output, wtv_prep)
+
+output = "C:/Users/conta/UROP/all_crosschecks/exp/WTV_crossmatch.csv"
+WTV_values = pd.read_csv("C:/Users/conta/UROP/all_crosschecks/exp/wtv_output.csv",skiprows=61)
+conf = sn.process_WTV_results(sn_list_cleaned, WTV_values, output)
+
+#%% Running all fitting:
+    #%% disco priors
+import sn_functions as sn
+
+datafolder = "D:/data/targets_vf/"
+all_t, all_i, all_e, all_labels, sector_list, discovery_dictionary, t_starts, gal_mags, info = sm.mcmc_load_lygos(datafolder, savepath, runproduce = False, label_use = 2)
+
+path = 'C:/Users/conta/UROP/plot_output/20210324/run_1/'
+best_params_file = path + "best_params.csv"
+ID_file = path + "ids.csv"
+upper_errors_file = path + "uppererr.csv"
+lower_errors_file = path + "lowererr.csv"
+
+run_all_discdate(path, all_t, all_i, all_e, all_labels, sector_list, 
+                        discovery_dictionary, t_starts, best_params_file,
+                        ID_file, upper_errors_file, lower_errors_file,
+                        quaternion_folder = "/users/conta/urop/quaternions/", 
+                        CBV_folder = "C:/Users/conta/.eleanor/metadata/")

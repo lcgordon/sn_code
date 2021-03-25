@@ -142,6 +142,7 @@ def metafile_load_smooth_quaternions(sector, maintimeaxis,
         return np.asarray(binned_t), np.asarray(binned_Q), outlier_indexes
         
     from scipy.signal import medfilt
+    import os
     for root, dirs, files in os.walk(quaternion_folder):
             for name in files:
                 if name.endswith(("S"+sector+"-quat.txt")):

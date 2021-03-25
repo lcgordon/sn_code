@@ -169,7 +169,7 @@ def prep_WTV_file(tnsfile, outputfile):
     print (df)
     
     for n in range(len(df)):
-        a = Angle(df['RA'][n], u.degree)
+        a = Angle(df['RA'][n], u.hourangle)
         a = a.degree
         df['RA'][n] = a
         b = Angle(df['DEC'][n], u.degree)
@@ -204,7 +204,7 @@ def process_WTV_results(all_tns, WTV_values, output_file):
                 WTV_confirmed = WTV_confirmed.append(all_tns.iloc[[(n-1)]])
             
     WTV_confirmed.reset_index(inplace = True, drop=True)   
-    del WTV_confirmed['index']     
+    #del WTV_confirmed['index']     
     WTV_confirmed.to_csv(output_file, index=False)
     return WTV_confirmed
 
@@ -227,6 +227,20 @@ def produce_lygos_list(sn_list, output):
     correct_cols.to_csv(output, index=False)
     return correct_cols
 
+def clear_list(listtoclean, listtoremove, output):
+    """Clears out all sn from a list that are not Ia and brighter than 22nd magnitude
+    at time of detection"""
+    badrows = []
+    for n in range(len(listtoclean) -1):
+        for i in range(len(listtoremove)):
+            if listtoclean["Name"][n].endswith(listtoremove["SNE"][i]):
+                badrows.append(n)
+                break
+    newlist = listtoclean.copy()
+    newlist.drop(badrows, inplace=True)
+    newlist.to_csv(output, index=False)
+    return newlist
+
 
 def retrieve_all_TNS_and_NED(savepath, SN_list):
     """"For a given list of SN, retrieves the TNS information
@@ -242,12 +256,18 @@ def retrieve_all_TNS_and_NED(savepath, SN_list):
         f.write("ID,RA,DEC,TYPE,DISCDATE,DISCMAG,Z,GALMAG,GALFILTER\n")
     
     for n in range(len(SN_list)):
-        name = SN_list[n][:-4]
+        name = SN_list[n]
+        #print(name)
+        if name == SN_list[n-1]:
+            print("skipping duplicates")
+            continue
+        print(name)
         if name.startswith("SN") or name.startswith("AT"):
             name = name[2:]
+            #print(name)
             
         RA_DEC_hr, RA_DEC_decimal, type_sn, redshift, discodate, discomag = tns.SN_page(name)
-        #print(RA_DEC_decimal, type_sn)
+        print(RA_DEC_decimal, type_sn)
         RA, DEC = RA_DEC_decimal.split(" ")
         
         co = coordinates.SkyCoord(ra=RA, dec=DEC,
@@ -276,8 +296,50 @@ def retrieve_all_TNS_and_NED(savepath, SN_list):
                                                           gal_mag, gal_filter))
 
 
+def limit_sector(datafolder, destinationfolder, sectorcutoff):
+    """Move all files from the wrong sector (> sectorcuttof) into badfolder """
+    import shutil
+    #badpath = datapath + "/outofbounds/"
+    for root, dirs, files in os.walk(datafolder):
+            for name in files:
+                if name.startswith(("rflx")):
+                    label = name.split("_")
+                    filepath = root + "/" + name
+                    if int(label[3][0:2]) > sectorcutoff:
+                        shutil.move(filepath, destinationfolder)
+    return
+def clear_not_on_list(pandasfile, datapath, badpath):
+    """Move all lygos files that aren't on the list of tragets into
+    a separate folder"""
+    for root, dirs, files in os.walk(datapath):
+        for name in files:
+            if name.startswith(("rflx")):
+                label = name.split("_")
+                filepath = root + "/" + name
+                s = pandasfile["Name"]
+                if not ("SN " + label[1]) in s.values:
+                    shutil.move(filepath, badpath)
+    return
+def isolate_fit_plots(mainfolder, subfolder):
+    """ scoot all fit plots into a subdir"""
+    import shutil
+    #badpath = datapath + "/outofbounds/"
+    for root, dirs, files in os.walk(mainfolder):
+            for name in files:
+                if name.endswith(("powerlaw.png")):
+                    
+                    filepath = root + "/" + name
+                    shutil.move(filepath, subfolder)
+    return
+
+def load_params(folder):
+    bestparams = pd.read_csv(folder + "best_params.csv",index_col=False)
+    uppererror = pd.read_csv(folder + "uppererr.csv",index_col=False)
+    lowererror = pd.read_csv(folder + "lowererr.csv",index_col=False)
+    sn_names = pd.read_csv(folder + "ids.csv", index_col = False)
+    return bestparams, uppererror, lowererror, sn_names
 ############ HELPER FUNCTIONS ####################
-def conv_lygos_to_mag(i, galmag):
+def conv_lygos_to_apparent_mag(i, galmag):
     #http://www.astro.ucla.edu/~wright/CosmoCalc.html
     if galmag > 19.0 or galmag is None:
         galmag = 19.0
@@ -285,11 +347,19 @@ def conv_lygos_to_mag(i, galmag):
     mA = -2.5* np.log10(i) + galmag
     return mA
 
+def convert_all_to_apparent_mag(all_i, gal_mags):
+    """Convert all intensities to apparent mag using galaxy magnitude """
+    for n in range(len(all_i)):
+        key = all_labels[n][2:-4]
+        all_i[n]= conv_lygos_to_apparent_mag(all_i[n], gal_mags[key])
+        #print(n)
+    return all_i
+
 
 def preclean_mcmc(file):
     """ opens the file and cleans the data for use in MCMC modeling"""
     #load data
-    t,ints,error = da.load_lygos_csv(file)
+    t,ints,error = du.load_lygos_csv(file)
 
     #sigma clip - set outliers to the mean value because idk how to remove them
     #is sigma clipping fucking up quaternions?
@@ -323,9 +393,9 @@ def crop_to_40(t, y, err):
     
 
 
-def plot_chain(path, targetlabel, plotlabel, sampler, labels, ndim):
+def plot_chain(path, targetlabel, plotlabel, samples, labels, ndim):
     fig, axes = plt.subplots(ndim, figsize=(10, 7), sharex=True)
-    samples = sampler.get_chain()
+    #samples = sampler.get_chain()
     labels = labels
     for i in range(ndim):
         ax = axes[i]
@@ -371,27 +441,33 @@ def retrieve_quaternions_bigfiles(savepath, quaternion_folder, sector, x):
                                            31, x)
     return tQ, Q1, Q2, Q3, outliers 
 
-def produce_discovery_time_dictionary(all_labels,disc_dates, t_starts):
+def produce_discovery_time_dictionary(all_labels, info, t_starts):
     """ returns the discovery time MINUS the start time of the sector"""
     discovery_dictionary = {}
     from astropy.time import Time
-    for n in range(len(disc_dates)):
-        discotime = Time(disc_dates[n], format = 'iso', scale='utc')
-        discotime = discotime.jd - t_starts[all_labels[n]]
-        discovery_dictionary[all_labels[n]] = discotime
+    for n in range(len(all_labels)): #for every label
+        key = all_labels[n][:-4] #cuts off last four digits of sector/cam
+        #print(key)
+        sectorstart = t_starts[all_labels[n]]
+        df1 = info[info['ID'].str.contains(key)]
+        df1.reset_index(inplace=True)
+        for n in range(len(df1)): #AHHHHH so there are sometimes multiple thingies w/ the same key
+            if df1["ID"][n] == key:
+                discotime = Time(df1["DISCDATE"][n], format = 'iso', scale='utc')
+                discotime = discotime.jd - sectorstart
+                discovery_dictionary[all_labels[n]] = discotime
 
     return discovery_dictionary
 
 def produce_gal_mag_dictionary(info):
     gal_mag_dict = {}
     for n in range(len(info)):
-        gal_mag_dict[info["ID"][n]] = info["GALMAG"][n]
-        
+        gal_mag_dict[info["ID"][n]] = info["GALMAG"][n]  
     return gal_mag_dict
         
 
 def generate_clip_quats_cbvs(sector, x, y, yerr, targetlabel, CBV_folder):
-    tQ, Q1, Q2, Q3, outliers = df.metafile_load_smooth_quaternions(sector, x)
+    tQ, Q1, Q2, Q3, outliers = du.metafile_load_smooth_quaternions(sector, x)
     Qall = Q1 + Q2 + Q3
     #load CBVs
     camera = targetlabel[-2]
@@ -418,8 +494,10 @@ def generate_clip_quats_cbvs(sector, x, y, yerr, targetlabel, CBV_folder):
 
 
 ############### BAYESIAN CURVE FITS ##############
-def mcmc_access_all(datapath, savepath):
-    """ Opens all Lygos files and loads them in."""
+def mcmc_load_lygos(datapath, savepath, runproduce = False, label_use = 1):
+    """ Opens all Lygos files and loads them in.
+    label_use = 1: filenames like: rflxtarg_2018eod_0114_30mn.csv
+    label_use = 2: filename like: rflxtarg_SN2018enj_n011_1312_30mn_m001.csv"""
     
     all_t = [] 
     all_i = []
@@ -429,108 +507,120 @@ def mcmc_access_all(datapath, savepath):
     discovery_dictionary = {}
     t_starts = {}
     
+    if label_use == 1:
+        name_label = 1
+        sector_label = 2
+    elif label_use == 2:
+        name_label = 1
+        sector_label = 3
+        
+    
     infofile = datapath + "TNS_information.csv"
-    runproduce = False
 
-    if os.path.isfile(infofile):
-        #load file info
-        info = pd.read_csv(infofile)
-        disc_dates = info["DISCDATE"]
-          
-    else:
-        #run file generation at the end
-        runproduce = True
+    if runproduce:
         sn_names = []
     
     for root, dirs, files in os.walk(datapath):
         for name in files:
             if name.startswith(("rflx")):
-                filepath = root + "/" + name 
-                print(name)
+                filepath = root + "/" + name
                 label = name.split("_")
-                full_label = label[1] + label[2]
-                all_labels.append(full_label)
-                sector = label[2][0:2]
-                sector_list.append(sector)
+                full_label = label[name_label]+label[sector_label]
+                sector = label[sector_label][0:2]
                 
-                t,i,e, t_start = preclean_mcmc(filepath)
-                t_starts[full_label] = t_start
-                
-                all_t.append(t)
-                all_i.append(i)
-                all_e.append(e)
-                
-                if runproduce:
-                    sn_names.append(label[1])
+                if int(sector) >= 27:
+                    print("Sector out of bounds")
+                    continue
+                    #skip to next one
+                else:
+                    all_labels.append(full_label)
+                    sector_list.append(sector)
+                    
+                    t,i,e, t_start = preclean_mcmc(filepath)
+                    t_starts[full_label] = t_start
+                    
+                    all_t.append(t)
+                    all_i.append(i)
+                    all_e.append(e)
+                    
+                    if runproduce:
+                        #print(label[1])
+                        sn_names.append(label[name_label])
     
     if runproduce:
-       retrieve_all_TNS_and_NED(datapath, sn_names) 
-       info = pd.read_csv(infofile)             
-       disc_dates = info["DISCDATE"]
+        print(sn_names[0:10])
+        retrieve_all_TNS_and_NED(datapath, sn_names) 
+    
+    info = pd.read_csv(infofile)
+    #info.drop_duplicates(inplace = True)             
+    #disc_dates = info["DISCDATE"]
+    #print(t_starts)
+    #print(t_starts[all_labels[0]])
        
-    discovery_dictionary = produce_discovery_time_dictionary(all_labels, disc_dates, t_starts)
+    discovery_dictionary = produce_discovery_time_dictionary(all_labels, info, t_starts)
     gal_mags = produce_gal_mag_dictionary(info)              
     return all_t, all_i, all_e, all_labels, sector_list, discovery_dictionary, t_starts, gal_mags, info
 
 
-def produce_all_best_params(savepath, all_labels, all_t, all_i, all_e,
-                            sector_list, discovery_times, t_starts, 
-                            plot = False,polynomial = True, 
-                            savefile = None, sn_names = None):
-    """ produces all best parameter sets for the given light curves. 
-    returns parameters, upper errors, and lower errors"""
-    num_curves = len(all_i)
-    if polynomial: 
-        ndim = 8
-    else: 
-        ndim = 7
+def run_all_powerlaw_t0(path, all_t, all_i, all_e, all_labels, sector_list, 
+                        discovery_dictionary, t_starts, best_params_file,
+                        ID_file, upper_errors_file, lower_errors_file,
+                        quaternion_folder = "/users/conta/urop/quaternions/", 
+                        CBV_folder = "C:/Users/conta/.eleanor/metadata/"):
     
+
+    with open(best_params_file, 'a') as f:
+        f.write("t0,A,beta,B,cQ,CBV1,CBV2,CBV3\n")
+    with open(upper_errors_file, 'a') as f:
+        f.write("t0,A,beta,B,cQ,CBV1,CBV2,CBV3\n")
+    with open(lower_errors_file, 'a') as f:
+        f.write("t0,A,beta,B,cQ,CBV1,CBV2,CBV3\n")
+    with open(ID_file, 'a') as p:
+        p.write("ID\n")
     
-    upper_error = np.zeros((num_curves, ndim))
-    lower_error = np.zeros((num_curves, ndim))
-    all_best_params = np.zeros((num_curves, ndim))
-    
-    
-    for k in range(num_curves):
-        
-        t = all_t[k]
-        i = all_i[k]
-        e = all_e[k]
-        filelabel = all_labels[k]
-        sector = sector_list[k]
-        
-        if polynomial: 
-            bestparams, uppererror, lowererror = mcmc_fit_polynomial_heaviside(savepath, filelabel, t, i, e, 
-                                  sector, discovery_times, t_starts, plot = plot, 
-                                  savefile = savefile, sn_names = sn_names)
-            
-        else:
-            #offset the discovery time by like five days - if this pushes negative, do not?
-            if discovery_times[all_labels[k][:-4]] - 5 > 0:
-                
-                t_start = discovery_times[all_labels[k][:-4]] - 5
-            else:
-                t_start = 0
-            bestparams, uppererror, lowererror = run_mcmc_fit_stepped_powerlaw_t0(savepath, filelabel, t,i,e, sector, t_start, 
-                                                                              discovery_times, t_starts, plot = plot, savefile = savefile, sn_names = sn_names)
-               
-        all_best_params[k] = bestparams
-        upper_error[k] = uppererror
-        lower_error[k] = lowererror
-     
-    return all_best_params, upper_error, lower_error
+    for n in range(len(all_labels)):
+        key = all_labels[n]
+        if -1 <= discovery_dictionary[key] <= 30:
+            mcmc_fit_stepped_powerlaw_t0(path, all_labels[n], all_t[n], 
+                                            all_i[n], all_e[n], sector_list[n],
+                                            discovery_dictionary, t_starts, best_params_file,
+                                            ID_file, upper_errors_file, lower_errors_file,
+                                            plot = True, quaternion_folder = quaternion_folder, 
+                                            CBV_folder = CBV_folder)
+
+    return
 
 def mcmc_fit_stepped_powerlaw_t0(path, targetlabel, t, intensity, error, sector,
-                                  discovery_times, t_starts, plot = True, 
+                                  discovery_times, t_starts, best_params_file,
+                                  ID_file, upper_errors_file, lower_errors_file,plot = True, 
                                  quaternion_folder = "/users/conta/urop/quaternions/", 
-                                 CBV_folder = "C:/Users/conta/.eleanor/metadata/", 
-                                 savefile = None, sn_names = None):
+                                 CBV_folder = "C:/Users/conta/.eleanor/metadata/"):
     """ Runs MCMC fitting for stepped power law fit
+    This is the fitting that matches: Firth 2015 (fireball), Olling 2015, Fausnaugh 2019
+    fireball power law with A, beta, B, and t0 floated
+    t1 = t - t0
+    F = A(t1)**beta + B + corrections
+    Runs two separate chains to hopefully hit convergence
+    Params:
+            - path to save into
+            - targetlabel for file names
+            - time axis
+            - intensities
+            - errors
+            - sector number (list)
+            - discovery times dictionary
+            - time start dictionary
+            - file to save best params into
+            - file to save name of sn into
+            - file to save upper errors on all params into
+            - file to save lower errors on all params into
+            - plot (true/false)
+            - path to folder containing quaternions
+            - path to folder containing CBVs
     
     """
-    
-    
-    def log_likelihood(theta, x, y, yerr, t0):
+
+    def log_likelihood(theta, x, y, yerr):
         """ calculates the log likelihood function. 
         constrain beta between 0.5 and 4.0
         A is positive
@@ -554,14 +644,14 @@ def mcmc_fit_stepped_powerlaw_t0(path, targetlabel, t, intensity, error, sector,
         return -np.inf
         
         #log probability
-    def log_probability(theta, x, y, yerr, t0):
+    def log_probability(theta, x, y, yerr):
         """ calculates log probabilty"""
         lp = log_prior(theta)
             
         if not np.isfinite(lp) or np.isnan(lp): #if lp is not 0.0
             return -np.inf
         
-        return lp + log_likelihood(theta, x, y, yerr, t0)
+        return lp + log_likelihood(theta, x, y, yerr)
     
     import matplotlib.pyplot as plt
     import emcee
@@ -581,16 +671,37 @@ def mcmc_fit_stepped_powerlaw_t0(path, targetlabel, t, intensity, error, sector,
     ndim = 8
     labels = ["t0", "A", "beta", "B", "cQ", "cbv1", "cbv2", "cbv3"] #, "cQ", "cbv1", "cbv2", "cbv3"
     p0 = np.ones((nwalkers, ndim)) + 1 * np.random.rand(nwalkers, ndim)
-    sampler = emcee.EnsembleSampler(nwalkers, ndim, log_probability, args=(x, y, yerr, t0))
+    sampler = emcee.EnsembleSampler(nwalkers, ndim, log_probability, args=(x, y, yerr))
     
-   # try:
-    state = sampler.run_mcmc(p0, 15000, progress=True)
+   # run ONCE
+    sampler.run_mcmc(p0, 12000, progress=True)
     if plot:
-        plot_chain(path, targetlabel, "-burn-in-plot.png", sampler, labels, ndim)
+        samples = sampler.get_chain()
+        plot_chain(path, targetlabel, "-burn-in-plot-intermediate.png", samples, labels, ndim)
     
     
-    flat_samples = sampler.get_chain(discard=4000, thin=15, flat=True)
-    print(flat_samples.shape)
+    flat_samples = sampler.get_chain(discard=6000, thin=15, flat=True)
+    #print(flat_samples.shape)
+    
+    #get intermediate best
+    best_mcmc_inter = np.zeros((1,ndim))
+    for i in range(ndim):
+        mcmc = np.percentile(flat_samples[:, i], [16, 50, 84])
+        best_mcmc_inter[0][i] = mcmc[1]
+        
+        
+    #reset p0 and run again
+    np.random.seed(50)
+    p0 = np.zeros((nwalkers, ndim))
+    for i in range(nwalkers):
+        p0[i] = best_mcmc_inter[0] + 0.1 * np.random.rand(1, ndim)
+        
+    sampler.run_mcmc(p0,12000, progress = True)
+    if plot:
+        samples = sampler.get_chain()
+        plot_chain(path, targetlabel, "-burn-in-plot-final.png", samples, labels, ndim)
+    
+    flat_samples = sampler.get_chain(discard=6000, thin=15, flat=True)
 
     #print out the best fit params based on 16th, 50th, 84th percentiles
     best_mcmc = np.zeros((1,ndim))
@@ -634,68 +745,95 @@ def mcmc_fit_stepped_powerlaw_t0(path, targetlabel, t, intensity, error, sector,
         
         #residual = y - best_fit_model
         plt.scatter(x, best_fit_model, label="best fit model", s = 5, color = 'red')
-        
-        discotime = discovery_times[targetlabel[:-4]] - t_starts["SN" + targetlabel[:-4]]
-        plt.axvline(discotime, color = 'green')
+        plt.axvline(best_mcmc[0][0], color = 'blue', label="t0")
+        discotime = discovery_times[targetlabel]
+        plt.axvline(discotime, color = 'green', label="discovery time")
         
         plt.legend(fontsize=8, loc="upper left")
         plt.title(targetlabel)
         plt.xlabel("BJD")
-        #plt.show()
         plt.savefig(path + targetlabel + "-MCMCmodel-stepped-powerlaw.png")
         
         
-    if savefile is not None:
-        with open(savefile, 'a') as f:
-            for i in range(ndim):
-                f.write(str(best_mcmc[0][i]))
-            f.write("\n")
-        with open(sn_names, 'a') as f:
-            f.write(targetlabel)
-            f.write("\n")
+    with open(best_params_file, 'a') as f:
+        for i in range(ndim):
+            f.write(str(best_mcmc[0][i]) + ",")
+        f.write("\n")
+    with open(ID_file, 'a') as f:
+        f.write(targetlabel)
+        f.write("\n")
+    with open(upper_errors_file, 'a') as f:
+        for i in range(ndim):
+            f.write(str(upper_error[0][i]) + ",")
+        f.write("\n")
+    with open(lower_errors_file, 'a') as f:
+        for i in range(ndim):
+            f.write(str(lower_error[0][i]) + ",")
+        f.write("\n")
     return best_mcmc, upper_error, lower_error
 
-def run_mcmc_fit_stepped_powerlaw(path, targetlabel, t, intensity, error, sector, t0,
-                                  discovery_times, t_starts, plot = True, 
+def stepped_powerlaw_t0_priors_from_discodate(path, targetlabel, t, intensity, error, sector,
+                                  discovery_times, t_starts, best_params_file,
+                                  ID_file, upper_errors_file, lower_errors_file,plot = True, 
                                  quaternion_folder = "/users/conta/urop/quaternions/", 
-                                 CBV_folder = "C:/Users/conta/.eleanor/metadata/", 
-                                 savefile = None, sn_names = None):
+                                 CBV_folder = "C:/Users/conta/.eleanor/metadata/"):
     """ Runs MCMC fitting for stepped power law fit
+    This is the fitting that matches: Firth 2015 (fireball), Olling 2015, Fausnaugh 2019
+    fireball power law with A, beta, B, and t0 floated
+    t1 = t - t0
+    F = A(t1)**beta + B + corrections
+    Runs two separate chains to hopefully hit convergence
+    Params:
+            - path to save into
+            - targetlabel for file names
+            - time axis
+            - intensities
+            - errors
+            - sector number (list)
+            - discovery times dictionary
+            - time start dictionary
+            - file to save best params into
+            - file to save name of sn into
+            - file to save upper errors on all params into
+            - file to save lower errors on all params into
+            - plot (true/false)
+            - path to folder containing quaternions
+            - path to folder containing CBVs
     
     """
-    
-    
-    def log_likelihood(theta, x, y, yerr, t0):
+
+    def log_likelihood(theta, x, y, yerr):
         """ calculates the log likelihood function. 
         constrain beta between 0.5 and 4.0
         A is positive
         need to add in cQ and CBVs!!
         only fit up to 40% of the flux"""
-        A, beta, B, cQ, cbv1, cbv2, cbv3 = theta #, cQ, cbv1, cbv2, cbv3
+        t0, A, beta, B, cQ, cbv1, cbv2, cbv3 = theta #, cQ, cbv1, cbv2, cbv3
         #print(A, beta, B)
-        model = np.heaviside((x - t0), 1) * A *(x-t0)**beta + B + cQ * Qall + cbv1 * CBV1 + cbv2 * CBV2 + cbv3 * CBV3
+        t1 = x - t0
+        model = np.heaviside((t1), 1) * A *(t1)**beta + B + cQ * Qall + cbv1 * CBV1 + cbv2 * CBV2 + cbv3 * CBV3
         
         yerr2 = yerr**2.0
         returnval = -0.5 * np.nansum((y - model) ** 2 / yerr2 + np.log(yerr2))
         return returnval
     
-    def log_prior(theta):
+    def log_prior(theta, disctime):
         """ calculates the log prior value """
-        A, beta, B, cQ, cbv1, cbv2, cbv3 = theta #, cQ, cbv1, cbv2, cbv3
+        t0, A, beta, B, cQ, cbv1, cbv2, cbv3 = theta #, cQ, cbv1, cbv2, cbv3
         #print(A, beta, B, cQ, cbv1, cbv2, cbv3)
-        if 0.5 < beta < 6.0 and 0.0 < A < 5.0 and -10 < B < 10 and -5000 < cQ < 5000 and -5000 < cbv1 < 5000 and -5000 < cbv2 < 5000 and -5000 < cbv3 < 5000:
+        if ((disctime - 2) < t0 < (disctime +2) and 0.5 < beta < 6.0 and 0.0 < A < 5.0 and -10 < B < 10 and (-100 > cQ > -800 ) and -5000 < cbv1 < 5000 and -5000 < cbv2 < 5000 and -5000 < cbv3 < 5000):
             return 0.0
         return -np.inf
         
         #log probability
-    def log_probability(theta, x, y, yerr, t0):
+    def log_probability(theta, x, y, yerr, disctime):
         """ calculates log probabilty"""
-        lp = log_prior(theta)
+        lp = log_prior(theta,disctime)
             
         if not np.isfinite(lp) or np.isnan(lp): #if lp is not 0.0
             return -np.inf
         
-        return lp + log_likelihood(theta, x, y, yerr, t0)
+        return lp + log_likelihood(theta, x, y, yerr)
     
     import matplotlib.pyplot as plt
     import emcee
@@ -704,6 +842,7 @@ def run_mcmc_fit_stepped_powerlaw(path, targetlabel, t, intensity, error, sector
     x = t
     y = intensity
     yerr = error
+    disctime = discovery_times[targetlabel]
     
     #load quaternions and CBVs
     x,y,yerr, tQ, Qall, CBV1, CBV2, CBV3 = generate_clip_quats_cbvs(sector, x, y, yerr,targetlabel, CBV_folder)
@@ -712,19 +851,60 @@ def run_mcmc_fit_stepped_powerlaw(path, targetlabel, t, intensity, error, sector
     #running MCMC
     np.random.seed(42)   
     nwalkers = 32
-    ndim = 7
-    labels = ["A", "beta", "B", "cQ", "cbv1", "cbv2", "cbv3"] #, "cQ", "cbv1", "cbv2", "cbv3"
-    p0 = np.ones((nwalkers, ndim)) + 1 * np.random.rand(nwalkers, ndim)
-    sampler = emcee.EnsembleSampler(nwalkers, ndim, log_probability, args=(x, y, yerr, t0))
+    ndim = 8
+    labels = ["t0", "A", "beta", "B", "cQ", "cbv1", "cbv2", "cbv3"] #, "cQ", "cbv1", "cbv2", "cbv3"
     
-   # try:
-    state = sampler.run_mcmc(p0, 15000, progress=True)
+    
+    p0 = np.zeros((nwalkers, ndim)) 
+    for n in range(len(p0)):
+        p0[n] = np.array((disctime, 0.1, 1.3, 0.8, 0, 0, 0, 0)) #mean values from before
+    #p0[:,0] = p0[:,0] + (disctime) #start t0 at discovery time
+    #p0[:,2] = p0[:,2] + 1 #start beta at 1
+    k = np.array((0.1,0.1,0.1,0.1, 500,500,500,500)) * np.random.rand(nwalkers,ndim)
+    p0 += k
+    
+    #### initial position needs to have a bigger spread for cQ-CBV3!!
+    
+    #print(p0[:,0])
+    sampler = emcee.EnsembleSampler(nwalkers, ndim, log_probability, args=(x, y, yerr, disctime))
+    
+   # run ONCE
+    sampler.run_mcmc(p0, 20000, progress=True)
+    sampler.get_chain()
     if plot:
-        plot_chain(path, targetlabel, "-burn-in-plot.png", sampler, labels, ndim)
+        samples = sampler.get_chain()
+        plot_chain(path, targetlabel, "-burn-in-plot-intermediate.png", samples, labels, ndim)
     
     
-    flat_samples = sampler.get_chain(discard=4000, thin=15, flat=True)
-    print(flat_samples.shape)
+    
+    #tau #= sampler.get_autocorr_time()
+    #print(tau)
+    flat_samples = sampler.get_chain(discard=6000, thin=15, flat=True)
+    #burnin = int(2 * np.nanmax(tau))
+    #thin = int(0.5 * np.nanmin(tau))
+    #flat_samples = sampler.get_chain(discard=burnin, flat=True, thin=thin)
+    #print(flat_samples.shape)
+    
+    #get intermediate best
+    best_mcmc_inter = np.zeros((1,ndim))
+    for i in range(ndim):
+        mcmc = np.percentile(flat_samples[:, i], [16, 50, 84])
+        best_mcmc_inter[0][i] = mcmc[1]
+        
+        
+    #reset p0 and run again
+    np.random.seed(50)
+    p0 = np.zeros((nwalkers, ndim))
+    for i in range(nwalkers):
+        p0[i] = best_mcmc_inter[0] + 0.1 * np.random.rand(1, ndim)
+       
+    #sampler.reset()
+    sampler.run_mcmc(p0,40000, progress = True)
+    if plot:
+        samples = sampler.get_chain()
+        plot_chain(path, targetlabel, "-burn-in-plot-final.png", samples[20000:], labels, ndim)
+    
+    flat_samples = sampler.get_chain(discard=6000, thin=15, flat=True)
 
     #print out the best fit params based on 16th, 50th, 84th percentiles
     best_mcmc = np.zeros((1,ndim))
@@ -737,8 +917,7 @@ def run_mcmc_fit_stepped_powerlaw(path, targetlabel, t, intensity, error, sector
         best_mcmc[0][i] = mcmc[1]
         upper_error[0][i] = q[1]
         lower_error[0][i] = q[0]
-        
-    print(best_mcmc)
+ 
     
     if plot:
         #corner plot the samples
@@ -752,288 +931,77 @@ def run_mcmc_fit_stepped_powerlaw(path, targetlabel, t, intensity, error, sector
         plt.show()
         plt.close()
         
-
         plt.scatter(x, y, label = "FFI data", color = 'gray')
          
-        #raw best fit model
-        #print(best_mcmc[0][0])
-        best_fit_model = np.heaviside((x - t0), 1) * best_mcmc[0][0] * ((x-t0)**(best_mcmc[0][1])) + best_mcmc[0][2]
-        best_fit_model = best_fit_model + best_mcmc[0][3] * Qall + best_mcmc[0][4] * CBV1 + best_mcmc[0][5] * CBV2 + best_mcmc[0][6] * CBV3
+        #best fit model
+        t1 = x - best_mcmc[0][0]
+        A = best_mcmc[0][1]
+        beta = best_mcmc[0][2]
+        B = best_mcmc[0][3]
+        cQ = best_mcmc[0][4]
+        cbv1 = best_mcmc[0][5]
+        cbv2 = best_mcmc[0][6]
+        cbv3 = best_mcmc[0][7]
+        
+        best_fit_model = np.heaviside((t1), 1) * A *(t1)**beta + B + cQ * Qall + cbv1 * CBV1 + cbv2 * CBV2 + cbv3 * CBV3
+        
+        #best_fit_model = np.heaviside((t1), 1) * A *(t1)**beta + B
         
         #residual = y - best_fit_model
         plt.scatter(x, best_fit_model, label="best fit model", s = 5, color = 'red')
+        plt.axvline(best_mcmc[0][0], color = 'blue', label="t0")
         
-        discotime = discovery_times[targetlabel[:-4]]
-        plt.axvline(discotime, color = 'green')
+        plt.axvline(disctime, color = 'green', label="discovery time")
+        plt.axvline(disctime - 2, color='pink', label="lower t0 prior")
+        plt.axvline(disctime + 2, color='pink', ls= 'dashed',label='upper t0 prior')
         
         plt.legend(fontsize=8, loc="upper left")
         plt.title(targetlabel)
         plt.xlabel("BJD")
-        #plt.show()
-        plt.savefig(path + targetlabel + "-MCMCmodel.png")
+        plt.savefig(path + targetlabel + "-MCMCmodel-stepped-powerlaw.png")
         
         
-    if savefile is not None:
-        with open(savefile, 'a') as f:
-            for i in range(ndim):
-                f.write(str(best_mcmc[0][i]))
-            f.write("\n")
-        with open(sn_names, 'a') as f:
-            f.write(targetlabel)
-            f.write("\n")
+    with open(best_params_file, 'a') as f:
+        for i in range(ndim):
+            f.write(str(best_mcmc[0][i]) + ",")
+        f.write("\n")
+    with open(ID_file, 'a') as f:
+        f.write(targetlabel)
+        f.write("\n")
+    with open(upper_errors_file, 'a') as f:
+        for i in range(ndim):
+            f.write(str(upper_error[0][i]) + ",")
+        f.write("\n")
+    with open(lower_errors_file, 'a') as f:
+        for i in range(ndim):
+            f.write(str(lower_error[0][i]) + ",")
+        f.write("\n")
     return best_mcmc, upper_error, lower_error
 
+def run_all_discdate(path, all_t, all_i, all_e, all_labels, sector_list, 
+                        discovery_dictionary, t_starts, best_params_file,
+                        ID_file, upper_errors_file, lower_errors_file,
+                        quaternion_folder = "/users/conta/urop/quaternions/", 
+                        CBV_folder = "C:/Users/conta/.eleanor/metadata/"):
+    
 
-
-def mcmc_fit_polynomial_heaviside(path, targetlabel, t, intensity, error, 
-                                  sector, discovery_times,t_starts, plot = True,
-                                  quaternion_folder = "/users/conta/urop/quaternions/",
-                                  CBV_folder = "C:/Users/conta/.eleanor/metadata/", 
-                                  savefile = None, sn_names = None):
-    """ Runs MCMC fitting, mandatory quaternions AND CBV_folder"""
+    with open(best_params_file, 'a') as f:
+        f.write("t0,A,beta,B,cQ,CBV1,CBV2,CBV3\n")
+    with open(upper_errors_file, 'a') as f:
+        f.write("t0,A,beta,B,cQ,CBV1,CBV2,CBV3\n")
+    with open(lower_errors_file, 'a') as f:
+        f.write("t0,A,beta,B,cQ,CBV1,CBV2,CBV3\n")
+    with open(ID_file, 'a') as p:
+        p.write("ID\n")
     
-    
-    def log_likelihood(theta, x, y, yerr):
-        """ calculates the log likelihood function. """
-        t0, c0, c1, c2, cQ, cbv1, cbv2, cbv3 = theta
-        t1 = x - t0
-        model = np.heaviside((c1 * t1 + c2 * t1 **2), 1) + c0 + cQ * Qall + cbv1 * CBV1 + cbv2 * CBV2 + cbv3 * CBV3
-        yerr2 = yerr ** 2
-        return -0.5 * np.nansum((y - model) ** 2 / yerr2 + np.log(yerr2))
-    
-    def log_prior(theta):
-        """ calculates the log prior value """
-        t0, c0, c1, c2, cQ, cbv1, cbv2, cbv3 = theta
-        if -2.0 < c0 < 2 and -2 < c1 < 2 and -2 < c2 < 2 and 0 < t0 < 30:
-            return 0.0
-        return -np.inf
-        
-        #log probability
-    def log_probability(theta, x, y, yerr):
-        """ calculates log probabilty"""
-        lp = log_prior(theta)
-        if not np.isfinite(lp):
-            return -np.inf
-        return lp + log_likelihood(theta, x, y, yerr)
-    
-           
-    import matplotlib.pyplot as plt
-    import emcee
-    rcParams['figure.figsize'] = 16,6
-    
-    ndim = 8
-    print(int(sector))
-    if int(sector) > 26:
-        print("sector out of range")
-        return np.zeros((1,ndim))
-    else: 
-        x = t
-        y = intensity
-        yerr = error
-        
-        np.random.seed(42)
-               
-        nwalkers = 32 
-        
-        #load quaternions and CBVs
-        x,y,yerr, tQ, Qall, CBV1, CBV2, CBV3 = generate_clip_quats_cbvs(sector, x, y, yerr,targetlabel, CBV_folder)
-        
-        #running MCMC
-        labels = ["t0", "c0", "c1", "c2", "cQ", "cbv1", "cbv2", "cbv3"]
-        p0 = np.zeros((nwalkers, ndim)) + 1e-2 * (np.random.rand(nwalkers, ndim) - 0.5)
-        sampler = emcee.EnsembleSampler(nwalkers, ndim, log_probability, args=(x, y, yerr))
-        state = sampler.run_mcmc(p0, 15000, progress=True)
-        
-        if plot:
-            plot_chain(path, targetlabel, "-burn-in-plot.png", sampler, labels, ndim)
-        
-        
-        flat_samples = sampler.get_chain(discard=5000, thin=15, flat=True)
-        best_mcmc = np.zeros((1,ndim))
-        upper_error = np.zeros((1,ndim))
-        lower_error = np.zeros((1,ndim))
-        for i in range(ndim):
-            mcmc = np.percentile(flat_samples[:, i], [16, 50, 84])
-            q = np.diff(mcmc)
-            #print(labels[i], mcmc[1], -1 * q[0], q[1] )
-            best_mcmc[0][i] = mcmc[1]
-            upper_error[0][i] = q[1]
-            lower_error[0][i] = q[0]
-        print(best_mcmc)
-    
-        
-        if plot:
-            #corner plot the samples
-            import corner
-            fig = corner.corner(
-                flat_samples, labels=labels,
-                quantiles = [0.16, 0.5, 0.84],
-                               show_titles=True,title_fmt = ".4f", title_kwargs={"fontsize": 12}
-            );
-            fig.savefig(path + targetlabel + 'corner-plot-params.png')
-            plt.close()
-            #plotting mcmc stuff
-            for ind in range(100):
-                sample = flat_samples[ind]
-                t1 = x - sample[0]
-                c0 = sample[1]
-                c1 = sample[2]
-                c2 = sample[3]
-                cQ = sample[4]
-                cbv1 = sample[5]
-                cbv2 = sample[6]
-                cbv3 = sample[7]
-                
-                modeltoplot = np.heaviside((c1 * t1 + c2 * t1 **2), 1) + c0 + cQ * Qall + cbv1 * CBV1 + cbv2 * CBV2 + cbv3 * CBV3
-                plt.plot(x, modeltoplot, color = 'blue', alpha = 0.1)
-            
-    
-            plt.scatter(x, y, label = "FFI data", color = 'gray')
-             
-            #raw best fit model
-            t1 = x - best_mcmc[0][0]
-            c0 = best_mcmc[0][1]
-            c1 = best_mcmc[0][2]
-            c2 = best_mcmc[0][3]
-            cQ = best_mcmc[0][4]
-            cbv1 = best_mcmc[0][5]
-            cbv2 = best_mcmc[0][6]
-            cbv3 = best_mcmc[0][7]
-            best_fit_model = np.heaviside((c1 * t1 + c2 * t1 **2), 1) + c0 + cQ * Qall + cbv1 * CBV1 + cbv2 * CBV2 + cbv3 * CBV3
-            
-            plt.scatter(x, best_fit_model, label = "best fit")
-            
-            discotime = discovery_times[targetlabel[:-4]] - t_starts["SN" + targetlabel[:-4]]
-            
-            plt.axvline(discotime, color = 'green')
-            plt.legend(fontsize=8, loc="upper left")
-            plt.title(targetlabel)
-            plt.xlabel("BJD")
-            plt.savefig(path + targetlabel + "-MCMC-polynomial-heaviside.png")
-        
-        if savefile is not None:
-            with open(savefile, 'a') as f:
-                for i in range(ndim):
-                    f.write(str(best_mcmc[0][i]))
-                f.write("\n")
-            with open(sn_names, 'a') as f:
-                f.write(targetlabel)
-                f.write("\n")
-            
-            
-        return best_mcmc, upper_error, lower_error
-
-
-
-def plot_mcmc_all(folderpath, savepath, all_t, all_i, all_e, all_labels, discovery_times, all_best_params, withquats = False):
-    import math
-    def plot_histogram_mcmc(parameters, savepath):
-        labels = ["c0", "c1", "c2", "c3", "c4"]
-        for i in range(5):
-            fig, ax1 = plt.subplots(figsize=(10,10))
-            data = parameters[:,i]
-            n_in, bins, patches = ax1.hist(data, 5)
-            
-            y_range = np.abs(n_in.max() - n_in.min())
-            x_range = np.abs(data.max() - data.min())
-            ax1.set_ylabel('Number of light curves')
-            ax1.set_xlabel(labels[i])
-            plt.savefig(savepath + labels[i] + "-histogram.png")
-            plt.close()
-        return
-    
-    
-    plot_histogram_mcmc(all_best_params, savepath)
-
-    ncols = 4
-    nrows = 4
-    ntotal = len(all_labels)
-    #print(ntotal)
-    num_figs = int(np.ceil(ntotal / ncols))
-    #print(num_figs)
-    m = 0
-    
-    #plotlabels = ['best fit', 'residuals', 'quaternions', 'background']
-    for i in range(num_figs): # for each figure
-        fig, ax = plt.subplots(nrows, ncols, sharex=False,
-                               figsize=(8*ncols, 3*nrows))
-        fig.suptitle("Plotting MCMC fits (" +  str(i) + ")")
-                        
-        if i == num_figs - 1 and ntotal % ncols != 0:
-            num_curves_to_plot = ntotal % ncols
-        else:
-            num_curves_to_plot = ncols
-                    
-        for j in range(num_curves_to_plot): #loop thru columns
-            tQ, Q1, Q2, Q3, outliers = df.metafile_load_smooth_quaternions(all_labels[m][9:11], all_t[m])
-            Qall = Q1 + Q2 + Q3
-                
-                # correct length differences between tQ and x
-            if len(all_t[m]) > len(tQ): #main is longer, truncate main
-                all_t[m] = all_t[m][:len(tQ)]
-                all_i[m] = y[:len(tQ)]
-                all_e[m] = yerr[:len(tQ)]
-            elif len(tQ) > len(all_t[m]): # if  tQ is longer, truncate tQ
-                tQ = tQ[:len(all_t[m])]
-                Q1 = Q1[:len(all_t[m])]
-                Q2 = Q2[:len(all_t[m])]
-                Q3 = Q3[:len(all_t[m])]
-                Qall = Qall[:len(all_t[m])]
-                
-            if withquats:
-                best_fit_model = all_best_params[m][0] + all_best_params[m][1] * all_t[m] + all_best_params[m][2] * all_t[m]**2 + all_best_params[m][3] * all_t[m]**3 + all_best_params[m][4] * all_t[m]**4 + all_best_params[m][5] * Qall
-                linquadfit =  all_best_params[m][1] * all_t[m] + all_best_params[m][2] + all_best_params[m][5] * Qall
-            else:
-                best_fit_model = all_best_params[m][0] + all_best_params[m][1] * all_t[m] + all_best_params[m][2] * all_t[m]**2 + all_best_params[m][3] * all_t[m]**3 + all_best_params[m][4] * all_t[m]**4
-                linquadfit = all_best_params[m][1] * all_t[m] + all_best_params[m][2]
-             
-            nuisanceparamfit =  all_best_params[m][0] + all_best_params[m][3] * all_t[m]**3 + all_best_params[m][4] * all_t[m]**4
-            #main plot of data and model
-            ax[0,j].set_title(all_labels[m])
-            ax[0,j].scatter(all_t[m],all_i[m], label="FFI data", color = 'gray')
-            ax[0,j].scatter(all_t[m], best_fit_model, label="best fit model", color = 'red')
-            ax[0,j].legend(loc="upper left")
-            
-            #plot residuals
-            ax[1,j].set_title("residuals")
-            residual = all_i[m] - best_fit_model
-            ax[1,j].scatter(all_t[m], residual, label = "residual", color = "green")
-            
-            #plot quaternions
-            ax[2,j].set_title("quaternions")
-            #sector = all_labels[m][9:11]
-            ax[2,j].scatter(tQ, Q1)
-            ax[2,j].scatter(tQ, Q2)
-            ax[2,j].scatter(tQ, Q3)
-            
-            #plot linear and quadratic fit to curve
-            ax[3,j].set_title("Component fits")
-            ax[3,j].scatter(all_t[m],all_i[m], label="FFI data", color = 'gray')
-            ax[3,j].scatter(all_t[m], linquadfit, label = "linear + quadratic fit", color = "red")
-            
-            ax[3,j].scatter(all_t[m], nuisanceparamfit, color = "blue", label = "nuisance parameter fit")
-            ax[3,j].legend(loc="upper left")
-            ax[3,j].set_ylim(ax[0,j].get_ylim())
-            
-            
-            ax[-1, j].set_xlabel('Time [BJD - 2457000]')
-            
-            #plot discovery times on all of them: 
-            for n in range(4): 
-                if n == 2: 
-                    continue
-                else:
-                    discotime = discovery_times[all_labels[m][0:9]]
-                    ax[n,j].axvline(discotime, color = 'green')
-                
-            m+=1 #go to next set of curves/parameters for the next one
-                
-        for l in range(nrows-1):
-            ax[l, 0].set_ylabel('Relative flux')
-                                    
-        fig.tight_layout()
-        fig.savefig(savepath + "mcmc-all-" + str(i) + '.png')
-        plt.show(fig)
-                
+    for n in range(len(all_labels)):
+        key = all_labels[n]
+        if -1 <= discovery_dictionary[key] <= 30:
+            stepped_powerlaw_t0_priors_from_discodate(path, all_labels[n], all_t[n], all_i[n],
+                                          all_e[n], sector_list[n], discovery_dictionary, 
+                                          t_starts, best_params_file,ID_file, 
+                                          upper_errors_file, lower_errors_file,plot = True, 
+                                         quaternion_folder = "/users/conta/urop/quaternions/", 
+                                         CBV_folder = "C:/Users/conta/.eleanor/metadata/")
 
     return
