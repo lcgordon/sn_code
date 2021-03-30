@@ -339,20 +339,30 @@ def load_params(folder):
     sn_names = pd.read_csv(folder + "ids.csv", index_col = False)
     return bestparams, uppererror, lowererror, sn_names
 ############ HELPER FUNCTIONS ####################
-def conv_lygos_to_apparent_mag(i, galmag):
-    #http://www.astro.ucla.edu/~wright/CosmoCalc.html
+def conv_to_abs_mag(i, galmag, z):
+    """Convert apparent magnitudeto absolute magnitude using the redshift in 
+    a Planck15 cosmology"""
+    from astropy.cosmology import Planck15
+    import astropy.units as u
+    cosmo = Planck15
+    d = cosmo.luminosity_distance(z).to(u.pc)
     if galmag > 19.0 or galmag is None:
         galmag = 19.0
         
-    mA = -2.5* np.log10(i) + galmag
-    return mA
+    apparent_mag = -2.5* np.log10(i) + galmag
+    M = apparent_mag + 5 - 5*np.log10(d.value)
+    return M
 
-def convert_all_to_apparent_mag(all_i, gal_mags):
-    """Convert all intensities to apparent mag using galaxy magnitude """
+def convert_all_to_abs_mag(all_i, info, all_labels, gal_mags):
     for n in range(len(all_i)):
-        key = all_labels[n][2:-4]
-        all_i[n]= conv_lygos_to_apparent_mag(all_i[n], gal_mags[key])
-        #print(n)
+        key = all_labels[n][:-4]
+        #dig z values out
+        z_table = info[info['ID'].str.contains(key)]
+        z_table.reset_index(inplace=True)
+        for i in range(len(z_table)): #in caseyou have like 2020kt and 2020kte
+            if z_table['ID'][i] == key:
+                z = z_table['Z'][i]
+        all_i[n]= conv_to_abs_mag(all_i[n], gal_mags[key], z)
     return all_i
 
 

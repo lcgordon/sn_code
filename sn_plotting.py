@@ -46,3 +46,13 @@ def plot_beta_redshift(savepath, info, sn_names, bestparams):
     plt.ylabel('beta value')
     plt.title("Plotting " +  r'$\beta$' + " versus redshift for Ia SNe")   
     plt.savefig(savepath + "redshift-beta.png") 
+    
+def plot_absmag(t,i, xlabel='',ylabel='', title='',savepath=None):
+    fig, ax =plt.subplots()
+    ax.scatter(t,i)
+    ax.invert_yaxis()
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.set_title(title)
+    if savepath is not None:
+        plt.savefig(savepath)
