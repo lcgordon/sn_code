@@ -82,14 +82,14 @@ openfolder = folder + "TNS_files/"
 full_tns = sn.compile_csvs(openfolder, "-0.csv",
                           savefilename = savefilename, sector = True)
 #cross clean to remove any too faint or not-Ia's
-output = "C:/Users/conta/UROP/all_crosschecks/exp/cleaned_tns.csv"
-sn_list_cleaned = sn.only_Ia_22_mag(full_tns, output)
-
-wtv_prep = "C:/Users/conta/UROP/all_crosschecks/exp/wtv_input.csv"
+output = "C:/Users/conta/UROP/all_crosschecks/ACTUAL/cleaned_tns.csv"
+sn_list_cleaned = sn.only_Ia_20_mag(full_tns, output)
+#%% prep for WTV
+wtv_prep = "C:/Users/conta/UROP/all_crosschecks/ACTUAL/wtv_input.csv"
 sn.prep_WTV_file(output, wtv_prep)
-
-output = "C:/Users/conta/UROP/all_crosschecks/exp/WTV_crossmatch.csv"
-WTV_values = pd.read_csv("C:/Users/conta/UROP/all_crosschecks/exp/wtv_output.csv",skiprows=61)
+#%%
+output = "C:/Users/conta/UROP/all_crosschecks/ACTUAL/WTV_crossmatch.csv"
+WTV_values = pd.read_csv("C:/Users/conta/UROP/all_crosschecks/ACTUAL/wtv_output.csv",skiprows=61)
 conf = sn.process_WTV_results(sn_list_cleaned, WTV_values, output)
 
 #%% Running all fitting:

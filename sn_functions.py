@@ -208,12 +208,12 @@ def process_WTV_results(all_tns, WTV_values, output_file):
     WTV_confirmed.to_csv(output_file, index=False)
     return WTV_confirmed
 
-def only_Ia_22_mag(sn_list, output):
+def only_Ia_20_mag(sn_list, output):
     """Clears out all sn from a list that are not Ia and brighter than 22nd magnitude
     at time of detection"""
     cleaned_targets = pd.DataFrame(columns = sn_list.columns)
     for n in range(len(sn_list) -1):
-        if sn_list["Obj. Type"][n] == "SN Ia" and sn_list["Discovery Mag/Flux"][n] <= 22:
+        if sn_list["Obj. Type"][n] == "SN Ia" and sn_list["Discovery Mag/Flux"][n] <= 20:
             cleaned_targets = cleaned_targets.append(sn_list.iloc[[n]])
             
     cleaned_targets.reset_index(inplace = True, drop=True)   
@@ -339,7 +339,7 @@ def load_params(folder):
     sn_names = pd.read_csv(folder + "ids.csv", index_col = False)
     return bestparams, uppererror, lowererror, sn_names
 ############ HELPER FUNCTIONS ####################
-def conv_to_abs_mag(i, galmag, z):
+def conv_to_abs_mag(t, i, e, galmag, z):
     """Convert apparent magnitudeto absolute magnitude using the redshift in 
     a Planck15 cosmology"""
     from astropy.cosmology import Planck15
@@ -348,13 +348,22 @@ def conv_to_abs_mag(i, galmag, z):
     d = cosmo.luminosity_distance(z).to(u.pc)
     if galmag > 19.0 or galmag is None:
         galmag = 19.0
-        
+     
+    #clip all <=0.1 values to clean up array when running into the log10's
+    i[i<=0.1] = np.nan
+    nan_array = np.argwhere(np.isnan(i))
+    i = np.delete(i, nan_array)
+    t = np.delete(t, nan_array)
+    e = np.delete(e, nan_array)
+    #convert
     apparent_mag = -2.5* np.log10(i) + galmag
+    apparent_e = -2.5* np.log10(e) + galmag
     M = apparent_mag + 5 - 5*np.log10(d.value)
-    return M
+    E = apparent_e + 5 - 5*np.log10(d.value)
+    return t,M, E
 
-def convert_all_to_abs_mag(all_i, info, all_labels, gal_mags):
-    for n in range(len(all_i)):
+def convert_all_to_abs_mag(allt, alli, alle, info, all_labels, gal_mags):
+    for n in range(len(alli)):
         key = all_labels[n][:-4]
         #dig z values out
         z_table = info[info['ID'].str.contains(key)]
@@ -362,8 +371,8 @@ def convert_all_to_abs_mag(all_i, info, all_labels, gal_mags):
         for i in range(len(z_table)): #in caseyou have like 2020kt and 2020kte
             if z_table['ID'][i] == key:
                 z = z_table['Z'][i]
-        all_i[n]= conv_to_abs_mag(all_i[n], gal_mags[key], z)
-    return all_i
+        allt[n], alli[n], alle[n] = conv_to_abs_mag(allt[n],alli[n], alle[n], gal_mags[key], z)
+    return allt, alli, alle
 
 
 def preclean_mcmc(file):
@@ -440,6 +449,16 @@ def bin_8_hours(t, i, e):
         
     return np.asarray(binned_t), np.asarray(binned_i), np.asarray(binned_e)
 
+def get_SN_IDs_in_LC_folder(folder):
+    """For a given folder of light curves, strip identifiers from the filenames """
+    listy = []
+    for root, dirs, files in os.walk(folder):
+            for name in files:
+                #print(name)
+                labels = name.split('-')
+                listy.append(labels[0])
+    return listy
+
 def retrieve_quaternions_bigfiles(savepath, quaternion_folder, sector, x):
         
     for root, dirs, files in os.walk(quaternion_folder):
@@ -447,26 +466,27 @@ def retrieve_quaternions_bigfiles(savepath, quaternion_folder, sector, x):
             if name.endswith(("sector"+sector+"-quat.fits")):
                 filepath = root + "/" + name
                 
-    tQ, Q1, Q2, Q3, outliers = df.extract_smooth_quaterions(savepath, filepath, None, 
+    tQ, Q1, Q2, Q3, outliers = du.extract_smooth_quaterions(savepath, filepath, None, 
                                            31, x)
     return tQ, Q1, Q2, Q3, outliers 
 
 def produce_discovery_time_dictionary(all_labels, info, t_starts):
     """ returns the discovery time MINUS the start time of the sector"""
-    discovery_dictionary = {}
-    from astropy.time import Time
-    for n in range(len(all_labels)): #for every label
+    discovery_dictionary = {} #initialize the dictionary
+    #print("creating discovery dictionary")
+    from astropy.time import Time #import time module
+    for n in range(len(all_labels)): #for every label in the list
         key = all_labels[n][:-4] #cuts off last four digits of sector/cam
-        #print(key)
-        sectorstart = t_starts[all_labels[n]]
+        sectorstart = t_starts[all_labels[n]] #get start date for the target
         df1 = info[info['ID'].str.contains(key)]
         df1.reset_index(inplace=True)
-        for n in range(len(df1)): #AHHHHH so there are sometimes multiple thingies w/ the same key
-            if df1["ID"][n] == key:
-                discotime = Time(df1["DISCDATE"][n], format = 'iso', scale='utc')
+        for i in range(len(df1)): # there are sometimes multiple thingies w/ the same key
+            if df1["ID"][i] == key:
+                discotime = Time(df1["DISCDATE"][i], format = 'iso', scale='utc')
                 discotime = discotime.jd - sectorstart
-                discovery_dictionary[all_labels[n]] = discotime
-
+                discovery_dictionary[all_labels[n]] = discotime #this is Nth not Ith!!
+                
+        del df1          
     return discovery_dictionary
 
 def produce_gal_mag_dictionary(info):
@@ -562,227 +582,12 @@ def mcmc_load_lygos(datapath, savepath, runproduce = False, label_use = 1):
         retrieve_all_TNS_and_NED(datapath, sn_names) 
     
     info = pd.read_csv(infofile)
-    #info.drop_duplicates(inplace = True)             
-    #disc_dates = info["DISCDATE"]
-    #print(t_starts)
-    #print(t_starts[all_labels[0]])
-       
     discovery_dictionary = produce_discovery_time_dictionary(all_labels, info, t_starts)
     gal_mags = produce_gal_mag_dictionary(info)              
     return all_t, all_i, all_e, all_labels, sector_list, discovery_dictionary, t_starts, gal_mags, info
 
 
-def run_all_powerlaw_t0(path, all_t, all_i, all_e, all_labels, sector_list, 
-                        discovery_dictionary, t_starts, best_params_file,
-                        ID_file, upper_errors_file, lower_errors_file,
-                        quaternion_folder = "/users/conta/urop/quaternions/", 
-                        CBV_folder = "C:/Users/conta/.eleanor/metadata/"):
-    
-
-    with open(best_params_file, 'a') as f:
-        f.write("t0,A,beta,B,cQ,CBV1,CBV2,CBV3\n")
-    with open(upper_errors_file, 'a') as f:
-        f.write("t0,A,beta,B,cQ,CBV1,CBV2,CBV3\n")
-    with open(lower_errors_file, 'a') as f:
-        f.write("t0,A,beta,B,cQ,CBV1,CBV2,CBV3\n")
-    with open(ID_file, 'a') as p:
-        p.write("ID\n")
-    
-    for n in range(len(all_labels)):
-        key = all_labels[n]
-        if -1 <= discovery_dictionary[key] <= 30:
-            mcmc_fit_stepped_powerlaw_t0(path, all_labels[n], all_t[n], 
-                                            all_i[n], all_e[n], sector_list[n],
-                                            discovery_dictionary, t_starts, best_params_file,
-                                            ID_file, upper_errors_file, lower_errors_file,
-                                            plot = True, quaternion_folder = quaternion_folder, 
-                                            CBV_folder = CBV_folder)
-
-    return
-
-def mcmc_fit_stepped_powerlaw_t0(path, targetlabel, t, intensity, error, sector,
-                                  discovery_times, t_starts, best_params_file,
-                                  ID_file, upper_errors_file, lower_errors_file,plot = True, 
-                                 quaternion_folder = "/users/conta/urop/quaternions/", 
-                                 CBV_folder = "C:/Users/conta/.eleanor/metadata/"):
-    """ Runs MCMC fitting for stepped power law fit
-    This is the fitting that matches: Firth 2015 (fireball), Olling 2015, Fausnaugh 2019
-    fireball power law with A, beta, B, and t0 floated
-    t1 = t - t0
-    F = A(t1)**beta + B + corrections
-    Runs two separate chains to hopefully hit convergence
-    Params:
-            - path to save into
-            - targetlabel for file names
-            - time axis
-            - intensities
-            - errors
-            - sector number (list)
-            - discovery times dictionary
-            - time start dictionary
-            - file to save best params into
-            - file to save name of sn into
-            - file to save upper errors on all params into
-            - file to save lower errors on all params into
-            - plot (true/false)
-            - path to folder containing quaternions
-            - path to folder containing CBVs
-    
-    """
-
-    def log_likelihood(theta, x, y, yerr):
-        """ calculates the log likelihood function. 
-        constrain beta between 0.5 and 4.0
-        A is positive
-        need to add in cQ and CBVs!!
-        only fit up to 40% of the flux"""
-        t0, A, beta, B, cQ, cbv1, cbv2, cbv3 = theta #, cQ, cbv1, cbv2, cbv3
-        #print(A, beta, B)
-        t1 = x - t0
-        model = np.heaviside((t1), 1) * A *(t1)**beta + B + cQ * Qall + cbv1 * CBV1 + cbv2 * CBV2 + cbv3 * CBV3
-        
-        yerr2 = yerr**2.0
-        returnval = -0.5 * np.nansum((y - model) ** 2 / yerr2 + np.log(yerr2))
-        return returnval
-    
-    def log_prior(theta):
-        """ calculates the log prior value """
-        t0, A, beta, B, cQ, cbv1, cbv2, cbv3 = theta #, cQ, cbv1, cbv2, cbv3
-        #print(A, beta, B, cQ, cbv1, cbv2, cbv3)
-        if 0 < t0 < 20 and 0.5 < beta < 6.0 and 0.0 < A < 5.0 and -10 < B < 10 and -5000 < cQ < 5000 and -5000 < cbv1 < 5000 and -5000 < cbv2 < 5000 and -5000 < cbv3 < 5000:
-            return 0.0
-        return -np.inf
-        
-        #log probability
-    def log_probability(theta, x, y, yerr):
-        """ calculates log probabilty"""
-        lp = log_prior(theta)
-            
-        if not np.isfinite(lp) or np.isnan(lp): #if lp is not 0.0
-            return -np.inf
-        
-        return lp + log_likelihood(theta, x, y, yerr)
-    
-    import matplotlib.pyplot as plt
-    import emcee
-    rcParams['figure.figsize'] = 16,6
-     
-    x = t
-    y = intensity
-    yerr = error
-    
-    #load quaternions and CBVs
-    x,y,yerr, tQ, Qall, CBV1, CBV2, CBV3 = generate_clip_quats_cbvs(sector, x, y, yerr,targetlabel, CBV_folder)
-        
-    
-    #running MCMC
-    np.random.seed(42)   
-    nwalkers = 32
-    ndim = 8
-    labels = ["t0", "A", "beta", "B", "cQ", "cbv1", "cbv2", "cbv3"] #, "cQ", "cbv1", "cbv2", "cbv3"
-    p0 = np.ones((nwalkers, ndim)) + 1 * np.random.rand(nwalkers, ndim)
-    sampler = emcee.EnsembleSampler(nwalkers, ndim, log_probability, args=(x, y, yerr))
-    
-   # run ONCE
-    sampler.run_mcmc(p0, 12000, progress=True)
-    if plot:
-        samples = sampler.get_chain()
-        plot_chain(path, targetlabel, "-burn-in-plot-intermediate.png", samples, labels, ndim)
-    
-    
-    flat_samples = sampler.get_chain(discard=6000, thin=15, flat=True)
-    #print(flat_samples.shape)
-    
-    #get intermediate best
-    best_mcmc_inter = np.zeros((1,ndim))
-    for i in range(ndim):
-        mcmc = np.percentile(flat_samples[:, i], [16, 50, 84])
-        best_mcmc_inter[0][i] = mcmc[1]
-        
-        
-    #reset p0 and run again
-    np.random.seed(50)
-    p0 = np.zeros((nwalkers, ndim))
-    for i in range(nwalkers):
-        p0[i] = best_mcmc_inter[0] + 0.1 * np.random.rand(1, ndim)
-        
-    sampler.run_mcmc(p0,12000, progress = True)
-    if plot:
-        samples = sampler.get_chain()
-        plot_chain(path, targetlabel, "-burn-in-plot-final.png", samples, labels, ndim)
-    
-    flat_samples = sampler.get_chain(discard=6000, thin=15, flat=True)
-
-    #print out the best fit params based on 16th, 50th, 84th percentiles
-    best_mcmc = np.zeros((1,ndim))
-    upper_error = np.zeros((1,ndim))
-    lower_error = np.zeros((1,ndim))
-    for i in range(ndim):
-        mcmc = np.percentile(flat_samples[:, i], [16, 50, 84])
-        q = np.diff(mcmc)
-        print(labels[i], mcmc[1], -1 * q[0], q[1] )
-        best_mcmc[0][i] = mcmc[1]
-        upper_error[0][i] = q[1]
-        lower_error[0][i] = q[0]
- 
-    
-    if plot:
-        #corner plot the samples
-        import corner
-        fig = corner.corner(
-            flat_samples, labels=labels,
-            quantiles = [0.16, 0.5, 0.84],
-                           show_titles=True,title_fmt = ".4f", title_kwargs={"fontsize": 12}
-        );
-        fig.savefig(path + targetlabel + 'corner-plot-params.png')
-        plt.show()
-        plt.close()
-        
-
-        plt.scatter(x, y, label = "FFI data", color = 'gray')
-         
-        #best fit model
-        t1 = x - best_mcmc[0][0]
-        A = best_mcmc[0][1]
-        beta = best_mcmc[0][2]
-        B = best_mcmc[0][3]
-        cQ = best_mcmc[0][4]
-        cbv1 = best_mcmc[0][5]
-        cbv2 = best_mcmc[0][6]
-        cbv3 = best_mcmc[0][7]
-        
-        best_fit_model = np.heaviside((t1), 1) * A *(t1)**beta + B + cQ * Qall + cbv1 * CBV1 + cbv2 * CBV2 + cbv3 * CBV3
-        
-        #residual = y - best_fit_model
-        plt.scatter(x, best_fit_model, label="best fit model", s = 5, color = 'red')
-        plt.axvline(best_mcmc[0][0], color = 'blue', label="t0")
-        discotime = discovery_times[targetlabel]
-        plt.axvline(discotime, color = 'green', label="discovery time")
-        
-        plt.legend(fontsize=8, loc="upper left")
-        plt.title(targetlabel)
-        plt.xlabel("BJD")
-        plt.savefig(path + targetlabel + "-MCMCmodel-stepped-powerlaw.png")
-        
-        
-    with open(best_params_file, 'a') as f:
-        for i in range(ndim):
-            f.write(str(best_mcmc[0][i]) + ",")
-        f.write("\n")
-    with open(ID_file, 'a') as f:
-        f.write(targetlabel)
-        f.write("\n")
-    with open(upper_errors_file, 'a') as f:
-        for i in range(ndim):
-            f.write(str(upper_error[0][i]) + ",")
-        f.write("\n")
-    with open(lower_errors_file, 'a') as f:
-        for i in range(ndim):
-            f.write(str(lower_error[0][i]) + ",")
-        f.write("\n")
-    return best_mcmc, upper_error, lower_error
-
-def stepped_powerlaw_t0_priors_from_discodate(path, targetlabel, t, intensity, error, sector,
+def stepped_powerlaw(path, targetlabel, t, intensity, error, sector,
                                   discovery_times, t_starts, best_params_file,
                                   ID_file, upper_errors_file, lower_errors_file,plot = True, 
                                  quaternion_folder = "/users/conta/urop/quaternions/", 
@@ -1007,7 +812,7 @@ def run_all_discdate(path, all_t, all_i, all_e, all_labels, sector_list,
     for n in range(len(all_labels)):
         key = all_labels[n]
         if -1 <= discovery_dictionary[key] <= 30:
-            stepped_powerlaw_t0_priors_from_discodate(path, all_labels[n], all_t[n], all_i[n],
+            stepped_powerlaw(path, all_labels[n], all_t[n], all_i[n],
                                           all_e[n], sector_list[n], discovery_dictionary, 
                                           t_starts, best_params_file,ID_file, 
                                           upper_errors_file, lower_errors_file,plot = True, 
@@ -1015,3 +820,42 @@ def run_all_discdate(path, all_t, all_i, all_e, all_labels, sector_list,
                                          CBV_folder = "C:/Users/conta/.eleanor/metadata/")
 
     return
+
+def retry_endofsectorlist(path, use_labels, all_t, all_i, all_e, all_labels, sector_list, 
+                        discovery_dictionary, t_starts, best_params_file,
+                        ID_file, upper_errors_file, lower_errors_file,
+                        quaternion_folder = "/users/conta/urop/quaternions/", 
+                        CBV_folder = "C:/Users/conta/.eleanor/metadata/"):
+    
+    no_data = []
+    with open(best_params_file, 'a') as f:
+        f.write("t0,A,beta,B,cQ,CBV1,CBV2,CBV3\n")
+    with open(upper_errors_file, 'a') as f:
+        f.write("t0,A,beta,B,cQ,CBV1,CBV2,CBV3\n")
+    with open(lower_errors_file, 'a') as f:
+        f.write("t0,A,beta,B,cQ,CBV1,CBV2,CBV3\n")
+    with open(ID_file, 'a') as p:
+        p.write("ID\n")
+    
+    for i in range(len(use_labels)):
+        id_ = use_labels[i] #full string for one to look for
+        try:
+            n = all_labels.index(id_) #position in big list
+            s = int(use_labels[i][-4:-2]) + 1 #get current sector + 1
+            #if the next label in the list 
+            if (all_labels[n+1].startswith(id_[:-4] + str(s))): #if the next label is the next sector
+                n = n+1
+                #key = all_labels[n]
+                sn.stepped_powerlaw(path, all_labels[n], all_t[n], all_i[n],
+                                     all_e[n], sector_list[n], discovery_dictionary, 
+                                     t_starts, best_params_file,ID_file, 
+                                     upper_errors_file, lower_errors_file,plot = True, 
+                                    quaternion_folder = "/users/conta/urop/quaternions/", 
+                                    CBV_folder = "C:/Users/conta/.eleanor/metadata/")
+            else: #next one is not hte next sector
+                no_data.append(id_)
+                print('nothing on', id_)
+        except ValueError:
+            print("not in list")
+
+    return no_data
