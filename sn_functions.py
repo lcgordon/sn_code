@@ -250,6 +250,7 @@ def retrieve_all_TNS_and_NED(savepath, SN_list):
     from astroquery.ned import Ned
     import astropy.units as u
     from astropy import coordinates
+    import time
     
     file = savepath + "TNS_information.csv"
     with open(file, 'a') as f:
@@ -258,14 +259,29 @@ def retrieve_all_TNS_and_NED(savepath, SN_list):
     for n in range(len(SN_list)):
         name = SN_list[n]
         #print(name)
-        if name == SN_list[n-1]:
+        if name.startswith("SN") or name.startswith("AT"):
+            name = name[2:]
+        if (name.endswith('1') or name.endswith('2') 
+            or name.endswith('3') or name.endswith('4')):
+            name = name[:-4]
+        
+        prevname = SN_list[n-1] 
+        if prevname.startswith("SN") or prevname.startswith("AT"):
+            prevname = prevname[2:]
+        if (prevname.endswith('1') or prevname.endswith('2') 
+            or prevname.endswith('3') or prevname.endswith('4')):
+            prevname = prevname[:-4]
+        
+        #print(name)
+        #print(prevname)
+        
+        if name == prevname:
             print("skipping duplicates")
             continue
         print(name)
-        if name.startswith("SN") or name.startswith("AT"):
-            name = name[2:]
+        
             #print(name)
-            
+        time.sleep(3)
         RA_DEC_hr, RA_DEC_decimal, type_sn, redshift, discodate, discomag = tns.SN_page(name)
         print(RA_DEC_decimal, type_sn)
         RA, DEC = RA_DEC_decimal.split(" ")
@@ -363,6 +379,9 @@ def conv_to_abs_mag(t, i, e, galmag, z):
     return t,M, E
 
 def convert_all_to_abs_mag(allt, alli, alle, info, all_labels, gal_mags):
+    ret_t = allt
+    ret_i = alli
+    ret_e = alle
     for n in range(len(alli)):
         key = all_labels[n][:-4]
         #dig z values out
@@ -371,8 +390,8 @@ def convert_all_to_abs_mag(allt, alli, alle, info, all_labels, gal_mags):
         for i in range(len(z_table)): #in caseyou have like 2020kt and 2020kte
             if z_table['ID'][i] == key:
                 z = z_table['Z'][i]
-        allt[n], alli[n], alle[n] = conv_to_abs_mag(allt[n],alli[n], alle[n], gal_mags[key], z)
-    return allt, alli, alle
+        ret_t[n], ret_i[n], ret_e[n] = conv_to_abs_mag(allt[n],alli[n], alle[n], gal_mags[key], z)
+    return ret_t, ret_i, ret_e
 
 
 def preclean_mcmc(file):
@@ -409,7 +428,22 @@ def crop_to_40(t, y, err):
     ints_40 = y[0:cutoffindex]
     err_40 = err[0:cutoffindex]
     return t_40, ints_40, err_40
-    
+
+def lists_by_folder(savepath, listToUse, listToCheck, batchname):
+    re_run_list = []
+
+    for n in range(len(listToCheck)):
+        key = listToCheck['Name'][n][3:]
+        for k in range(len(listToUse)):
+            if listToUse[k][:-8] == key:
+                re_run_list.append(n)
+                break
+    print("found", len(re_run_list))
+    p = len(listToCheck)
+    ally = np.arange(0,p,1)
+    ally = np.delete(ally, re_run_list) 
+    batch = listToCheck.drop(ally, inplace=False)
+    batch.to_csv(savepath + batchname + ".csv")    
 
 
 def plot_chain(path, targetlabel, plotlabel, samples, labels, ndim):
@@ -523,8 +557,9 @@ def generate_clip_quats_cbvs(sector, x, y, yerr, targetlabel, CBV_folder):
     return x,y,yerr, tQ, Qall, CBV1, CBV2, CBV3
 
 
+
 ############### BAYESIAN CURVE FITS ##############
-def mcmc_load_lygos(datapath, savepath, runproduce = False, label_use = 1):
+def mcmc_load_lygos(datapath, savepath, runproduce = False):
     """ Opens all Lygos files and loads them in.
     label_use = 1: filenames like: rflxtarg_2018eod_0114_30mn.csv
     label_use = 2: filename like: rflxtarg_SN2018enj_n011_1312_30mn_m001.csv"""
@@ -537,12 +572,6 @@ def mcmc_load_lygos(datapath, savepath, runproduce = False, label_use = 1):
     discovery_dictionary = {}
     t_starts = {}
     
-    if label_use == 1:
-        name_label = 1
-        sector_label = 2
-    elif label_use == 2:
-        name_label = 1
-        sector_label = 3
         
     
     infofile = datapath + "TNS_information.csv"
@@ -555,8 +584,15 @@ def mcmc_load_lygos(datapath, savepath, runproduce = False, label_use = 1):
             if name.startswith(("rflx")):
                 filepath = root + "/" + name
                 label = name.split("_")
-                full_label = label[name_label]+label[sector_label]
-                sector = label[sector_label][0:2]
+                
+                if len(label) == 4:
+                    full_label = label[1]+label[2]
+                    sector = label[2][0:2]
+                elif len(label) == 6:
+                    full_label = label[1][2:]+label[3]
+                    sector = label[3][0:2]
+                
+                
                 
                 if int(sector) >= 27:
                     print("Sector out of bounds")
@@ -575,10 +611,11 @@ def mcmc_load_lygos(datapath, savepath, runproduce = False, label_use = 1):
                     
                     if runproduce:
                         #print(label[1])
-                        sn_names.append(label[name_label])
+                        sn_names.append(label[1])
     
     if runproduce:
-        print(sn_names[0:10])
+        #print(sn_names[0:10])
+        
         retrieve_all_TNS_and_NED(datapath, sn_names) 
     
     info = pd.read_csv(infofile)
@@ -626,7 +663,8 @@ def stepped_powerlaw(path, targetlabel, t, intensity, error, sector,
         t0, A, beta, B, cQ, cbv1, cbv2, cbv3 = theta #, cQ, cbv1, cbv2, cbv3
         #print(A, beta, B)
         t1 = x - t0
-        model = np.heaviside((t1), 1) * A *(t1)**beta + B + cQ * Qall + cbv1 * CBV1 + cbv2 * CBV2 + cbv3 * CBV3
+        model = (np.heaviside((t1), 1) * A *np.nan_to_num((t1**beta)) + B + 
+                 cQ * Qall + cbv1 * CBV1 + cbv2 * CBV2 + cbv3 * CBV3)
         
         yerr2 = yerr**2.0
         returnval = -0.5 * np.nansum((y - model) ** 2 / yerr2 + np.log(yerr2))
@@ -636,7 +674,10 @@ def stepped_powerlaw(path, targetlabel, t, intensity, error, sector,
         """ calculates the log prior value """
         t0, A, beta, B, cQ, cbv1, cbv2, cbv3 = theta #, cQ, cbv1, cbv2, cbv3
         #print(A, beta, B, cQ, cbv1, cbv2, cbv3)
-        if ((disctime - 2) < t0 < (disctime +2) and 0.5 < beta < 6.0 and 0.0 < A < 5.0 and -10 < B < 10 and (-100 > cQ > -800 ) and -5000 < cbv1 < 5000 and -5000 < cbv2 < 5000 and -5000 < cbv3 < 5000):
+        if ((disctime - 2) < t0 < (disctime +2) and 0.5 < beta < 6.0 
+            and 0.0 < A < 5.0 and -10 < B < 10 and (-100 > cQ > -800 ) 
+            and -5000 < cbv1 < 5000 and -5000 < cbv2 < 5000 
+            and -5000 < cbv3 < 5000):
             return 0.0
         return -np.inf
         
@@ -673,14 +714,10 @@ def stepped_powerlaw(path, targetlabel, t, intensity, error, sector,
     p0 = np.zeros((nwalkers, ndim)) 
     for n in range(len(p0)):
         p0[n] = np.array((disctime, 0.1, 1.3, 0.8, 0, 0, 0, 0)) #mean values from before
-    #p0[:,0] = p0[:,0] + (disctime) #start t0 at discovery time
-    #p0[:,2] = p0[:,2] + 1 #start beta at 1
+
     k = np.array((0.1,0.1,0.1,0.1, 500,500,500,500)) * np.random.rand(nwalkers,ndim)
     p0 += k
     
-    #### initial position needs to have a bigger spread for cQ-CBV3!!
-    
-    #print(p0[:,0])
     sampler = emcee.EnsembleSampler(nwalkers, ndim, log_probability, args=(x, y, yerr, disctime))
     
    # run ONCE
@@ -691,14 +728,7 @@ def stepped_powerlaw(path, targetlabel, t, intensity, error, sector,
         plot_chain(path, targetlabel, "-burn-in-plot-intermediate.png", samples, labels, ndim)
     
     
-    
-    #tau #= sampler.get_autocorr_time()
-    #print(tau)
     flat_samples = sampler.get_chain(discard=6000, thin=15, flat=True)
-    #burnin = int(2 * np.nanmax(tau))
-    #thin = int(0.5 * np.nanmin(tau))
-    #flat_samples = sampler.get_chain(discard=burnin, flat=True, thin=thin)
-    #print(flat_samples.shape)
     
     #get intermediate best
     best_mcmc_inter = np.zeros((1,ndim))
@@ -746,7 +776,6 @@ def stepped_powerlaw(path, targetlabel, t, intensity, error, sector,
         plt.show()
         plt.close()
         
-        plt.scatter(x, y, label = "FFI data", color = 'gray')
          
         #best fit model
         t1 = x - best_mcmc[0][0]
@@ -758,24 +787,40 @@ def stepped_powerlaw(path, targetlabel, t, intensity, error, sector,
         cbv2 = best_mcmc[0][6]
         cbv3 = best_mcmc[0][7]
         
-        best_fit_model = np.heaviside((t1), 1) * A *(t1)**beta + B + cQ * Qall + cbv1 * CBV1 + cbv2 * CBV2 + cbv3 * CBV3
+        best_fit_model = np.heaviside((t1), 1) * A *np.nan_to_num((t1**beta), copy=False) + B + cQ * Qall + cbv1 * CBV1 + cbv2 * CBV2 + cbv3 * CBV3
         
-        #best_fit_model = np.heaviside((t1), 1) * A *(t1)**beta + B
+        nrows = 3
+        ncols = 1
+        fig, ax = plt.subplots(nrows, ncols, sharex=True,
+                                       figsize=(8*ncols * 2, 3*nrows * 2))
         
-        #residual = y - best_fit_model
-        plt.scatter(x, best_fit_model, label="best fit model", s = 5, color = 'red')
-        plt.axvline(best_mcmc[0][0], color = 'blue', label="t0")
+        ax[0].scatter(x, best_fit_model, label="best fit model", s = 5, color = 'red')
+        ax[0].scatter(x, y, label = "FFI data", s = 2, color = 'gray')
+        for n in range(nrows):
+            ax[n].axvline(best_mcmc[0][0], color = 'blue', label="t0")
+            ax[n].axvline(disctime, color = 'green', label="discovery time")
+            ax[n].axvline(disctime - 2, color='pink', label="lower t0 prior")
+            ax[n].axvline(disctime + 2, color='pink', ls= 'dashed',label='upper t0 prior')
+            ax[n].set_ylabel("Rel. Flux")
+            
+        #main
+        ax[0].set_title(targetlabel)
+        ax[0].legend(fontsize=8, loc="upper left")
+        ax[nrows-1].set_xlabel("BJD-" + str(t_starts[targetlabel]))
         
-        plt.axvline(disctime, color = 'green', label="discovery time")
-        plt.axvline(disctime - 2, color='pink', label="lower t0 prior")
-        plt.axvline(disctime + 2, color='pink', ls= 'dashed',label='upper t0 prior')
+        #residuals
+        ax[1].set_title("Residual (y-model)")
+        residuals = y - best_fit_model
+        ax[1].scatter(x,residuals, s=2, color = 'red')
         
-        plt.legend(fontsize=8, loc="upper left")
-        plt.title(targetlabel)
-        plt.xlabel("BJD")
+        #CBV fits\
+        ax[2].set_title("Residuals (y-corrective terms)")
+        corrections = cQ*Qall + cbv1 * CBV1 + cbv2 * CBV2 + cbv3 * CBV3
+        correction_residuals = y-corrections
+        ax[2].scatter(x, correction_residuals)
+        
         plt.savefig(path + targetlabel + "-MCMCmodel-stepped-powerlaw.png")
-        
-        
+                
     with open(best_params_file, 'a') as f:
         for i in range(ndim):
             f.write(str(best_mcmc[0][i]) + ",")

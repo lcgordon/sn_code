@@ -56,3 +56,17 @@ def plot_absmag(t,i, xlabel='',ylabel='', title='',savepath=None):
     ax.set_title(title)
     if savepath is not None:
         plt.savefig(savepath)
+        
+def quicklook_plotall(path, all_t, all_i, all_labels, discovery_dictionary):
+    """Plot all in the list and save plots into dedicated folder
+    allows for quick flip thru them all to get rid of gunk. """
+    from pylab import rcParams
+    rcParams['figure.figsize'] = 8,3
+    for n in range(len(all_labels)):
+        key = all_labels[n]
+        if -3 <= discovery_dictionary[key] <= 30:
+            plt.scatter(all_t[n], all_i[n])
+            plt.axvline(discovery_dictionary[key])
+            plt.title(all_labels[n])
+            plt.savefig(path + all_labels[n] + "-.png")
+            plt.close()
