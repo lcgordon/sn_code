@@ -265,19 +265,20 @@ def retrieve_all_TNS_and_NED(savepath, SN_list):
             or name.endswith('3') or name.endswith('4')):
             name = name[:-4]
         
-        prevname = SN_list[n-1] 
-        if prevname.startswith("SN") or prevname.startswith("AT"):
-            prevname = prevname[2:]
-        if (prevname.endswith('1') or prevname.endswith('2') 
-            or prevname.endswith('3') or prevname.endswith('4')):
-            prevname = prevname[:-4]
-        
-        #print(name)
-        #print(prevname)
-        
-        if name == prevname:
-            print("skipping duplicates")
-            continue
+        if len(SN_list) > 1:
+            prevname = SN_list[n-1] 
+            if prevname.startswith("SN") or prevname.startswith("AT"):
+                prevname = prevname[2:]
+            if (prevname.endswith('1') or prevname.endswith('2') 
+                or prevname.endswith('3') or prevname.endswith('4')):
+                prevname = prevname[:-4]
+            
+            #print(name)
+            #print(prevname)
+            
+            if name == prevname and len(SN_list) != 2 and n != 1:
+                print("skipping duplicates")
+                continue
         print(name)
         
             #print(name)
@@ -354,8 +355,24 @@ def load_params(folder):
     lowererror = pd.read_csv(folder + "lowererr.csv",index_col=False)
     sn_names = pd.read_csv(folder + "ids.csv", index_col = False)
     return bestparams, uppererror, lowererror, sn_names
+
+
+
 ############ HELPER FUNCTIONS ####################
-def conv_to_abs_mag(t, i, e, galmag, z):
+
+def beep():
+    import winsound
+    duration = 500  # milliseconds
+    freqA = 220  # A Hz
+    freqD = 294 #D
+    freqB = 245 #B
+    winsound.Beep(freqD, duration)
+    winsound.Beep(freqB, duration)
+    winsound.Beep(freqA, 3* duration)
+    
+
+
+def conv_to_abs_mag(t, i, e, galmag, z, extinction = None):
     """Convert apparent magnitudeto absolute magnitude using the redshift in 
     a Planck15 cosmology"""
     from astropy.cosmology import Planck15
@@ -366,17 +383,34 @@ def conv_to_abs_mag(t, i, e, galmag, z):
         galmag = 19.0
      
     #clip all <=0.1 values to clean up array when running into the log10's
-    i[i<=0.1] = np.nan
-    nan_array = np.argwhere(np.isnan(i))
-    i = np.delete(i, nan_array)
-    t = np.delete(t, nan_array)
-    e = np.delete(e, nan_array)
+    i1 = np.copy(i)
+    t1 = np.copy(t)
+    e1 = np.copy(e)
+    i1[i1<=0.1] = np.nan
+    nan_array = np.argwhere(np.isnan(i1))
+    i1 = np.delete(i1, nan_array)
+    t1 = np.delete(t1, nan_array)
+    e1 = np.delete(e1, nan_array)
     #convert
-    apparent_mag = -2.5* np.log10(i) + galmag
-    apparent_e = -2.5* np.log10(e) + galmag
+    apparent_mag = -2.5* np.log10(i1) + galmag
+    if extinction is not None:
+        apparent_mag += extinction
     M = apparent_mag + 5 - 5*np.log10(d.value)
-    E = apparent_e + 5 - 5*np.log10(d.value)
-    return t,M, E
+    
+    #calculating error in apparent magnitudes
+    #apparent_e = apparent_mag - apparentmag of (i+e) (called a)
+    a = -2.5* np.log10(i1+np.absolute(e1)) + galmag
+    
+    apparent_e = a - apparent_mag
+    
+    #and then the same for abs mag:
+    #take M - a, where a is the absolute magnitude calculated at apparent i + apparent e
+    a = (apparent_e+apparent_mag) + 5 - 5*np.log10(d.value)
+    E = M - a
+    
+    absgal = galmag + 5 - 5*np.log10(d.value)
+    
+    return t1,M, E, absgal,d, apparent_mag, apparent_e
 
 def convert_all_to_abs_mag(allt, alli, alle, info, all_labels, gal_mags):
     ret_t = allt
@@ -390,7 +424,7 @@ def convert_all_to_abs_mag(allt, alli, alle, info, all_labels, gal_mags):
         for i in range(len(z_table)): #in caseyou have like 2020kt and 2020kte
             if z_table['ID'][i] == key:
                 z = z_table['Z'][i]
-        ret_t[n], ret_i[n], ret_e[n] = conv_to_abs_mag(allt[n],alli[n], alle[n], gal_mags[key], z)
+        ret_t[n], ret_i[n], ret_e[n], absgal,d = conv_to_abs_mag(allt[n],alli[n], alle[n], gal_mags[key], z)
     return ret_t, ret_i, ret_e
 
 
@@ -415,19 +449,7 @@ def preclean_mcmc(file):
     return t_sub, ints, error, t.min()
 
 
-def crop_to_40(t, y, err):
-    """ only fit first 40% of brightness of curve"""
-    brightness40 = (y.max() - y.min()) * 0.4
 
-    for n in range(len(y)):
-        if y[n] > brightness40:
-            cutoffindex = n
-            break
-                
-    t_40 = t[0:cutoffindex]
-    ints_40 = y[0:cutoffindex]
-    err_40 = err[0:cutoffindex]
-    return t_40, ints_40, err_40
 
 def lists_by_folder(savepath, listToUse, listToCheck, batchname):
     re_run_list = []
@@ -462,7 +484,7 @@ def plot_chain(path, targetlabel, plotlabel, samples, labels, ndim):
     plt.show()
     return
 
-def bin_8_hours(t, i, e):
+def bin_8_hours_TIE(t, i, e):
     n_points = 16
     binned_t = []
     binned_i = []
@@ -473,7 +495,7 @@ def bin_8_hours(t, i, e):
     while m <= len(t):
         bin_t = t[n + 8] #get the midpoint of this data as the point to plot at
         binned_t.append(bin_t) #put into new array
-        bin_i = np.mean(i[n:m]) #bin the stretch
+        bin_i = np.nanmean(i[n:m]) #bin the stretch
         binned_i.append(bin_i) #put into new array
         bin_e = np.sqrt(np.sum(e[n:m]**2)) / n_points #error propagates as sqrt(sum of squares of error)
         binned_e.append(bin_e)
@@ -482,6 +504,37 @@ def bin_8_hours(t, i, e):
         m+= n_points
         
     return np.asarray(binned_t), np.asarray(binned_i), np.asarray(binned_e)
+
+def crop_to_percent(t, y, err, fraction):
+    """ only fit first 40% of brightness of curve"""
+    brightness40 = ((y.max() - y.min()) * fraction) + y.min()
+
+    for n in range(len(y)):
+        if y[n] > brightness40:
+            cutoffindex = n
+            break
+                
+    t_40 = t[0:cutoffindex]
+    ints_40 = y[0:cutoffindex]
+    err_40 = err[0:cutoffindex]
+    return t_40, ints_40, err_40
+
+def clip_TIE(badIndexes, x,y,yerr):
+    x = np.delete(x, badIndexes)
+    y = np.delete(y, badIndexes)
+    yerr = np.delete(yerr, badIndexes)
+    return x,y,yerr
+
+def clip_all(badIndexes, x,y,yerr,tQ,Qall, CBV1, CBV2, CBV3):
+        x = np.delete(x, badIndexes)
+        y = np.delete(y, badIndexes)
+        yerr = np.delete(yerr, badIndexes)
+        tQ = np.delete(tQ, badIndexes)
+        Qall = np.delete(Qall, badIndexes)
+        CBV1 = np.delete(CBV1, badIndexes)
+        CBV2 = np.delete(CBV2, badIndexes)
+        CBV3 = np.delete(CBV3, badIndexes)
+        return x,y,yerr,tQ,Qall, CBV1, CBV2, CBV3
 
 def get_SN_IDs_in_LC_folder(folder):
     """For a given folder of light curves, strip identifiers from the filenames """
@@ -615,20 +668,25 @@ def mcmc_load_lygos(datapath, savepath, runproduce = False):
     
     if runproduce:
         #print(sn_names[0:10])
-        
-        retrieve_all_TNS_and_NED(datapath, sn_names) 
+        if not os.path.isfile(infofile):
+            retrieve_all_TNS_and_NED(datapath, sn_names) 
+        else:
+            print("TNS file already exists")
     
     info = pd.read_csv(infofile)
     discovery_dictionary = produce_discovery_time_dictionary(all_labels, info, t_starts)
     gal_mags = produce_gal_mag_dictionary(info)              
+    
+    #beep()
     return all_t, all_i, all_e, all_labels, sector_list, discovery_dictionary, t_starts, gal_mags, info
 
 
 def stepped_powerlaw(path, targetlabel, t, intensity, error, sector,
-                                  discovery_times, t_starts, best_params_file,
-                                  ID_file, upper_errors_file, lower_errors_file,plot = True, 
-                                 quaternion_folder = "/users/conta/urop/quaternions/", 
-                                 CBV_folder = "C:/Users/conta/.eleanor/metadata/"):
+                     discovery_times, t_starts, best_params_file,
+                     ID_file, upper_errors_file, lower_errors_file,
+                     plot = True, n1=20000, n2=40000, badIndexes = None,
+                    quaternion_folder = "/users/conta/urop/quaternions/", 
+                    CBV_folder = "C:/Users/conta/.eleanor/metadata/"):
     """ Runs MCMC fitting for stepped power law fit
     This is the fitting that matches: Firth 2015 (fireball), Olling 2015, Fausnaugh 2019
     fireball power law with A, beta, B, and t0 floated
@@ -660,10 +718,10 @@ def stepped_powerlaw(path, targetlabel, t, intensity, error, sector,
         A is positive
         need to add in cQ and CBVs!!
         only fit up to 40% of the flux"""
-        t0, A, beta, B, cQ, cbv1, cbv2, cbv3 = theta #, cQ, cbv1, cbv2, cbv3
+        t0, A, beta, cQ, cbv1, cbv2, cbv3 = theta #, cQ, cbv1, cbv2, cbv3
         #print(A, beta, B)
         t1 = x - t0
-        model = (np.heaviside((t1), 1) * A *np.nan_to_num((t1**beta)) + B + 
+        model = (np.heaviside((t1), 1) * A *np.nan_to_num((t1**beta)) + 
                  cQ * Qall + cbv1 * CBV1 + cbv2 * CBV2 + cbv3 * CBV3)
         
         yerr2 = yerr**2.0
@@ -672,12 +730,13 @@ def stepped_powerlaw(path, targetlabel, t, intensity, error, sector,
     
     def log_prior(theta, disctime):
         """ calculates the log prior value """
-        t0, A, beta, B, cQ, cbv1, cbv2, cbv3 = theta #, cQ, cbv1, cbv2, cbv3
+        t0, A, beta, cQ, cbv1, cbv2, cbv3 = theta #, cQ, cbv1, cbv2, cbv3
         #print(A, beta, B, cQ, cbv1, cbv2, cbv3)
-        if ((disctime - 2) < t0 < (disctime +2) and 0.5 < beta < 6.0 
-            and 0.0 < A < 5.0 and -10 < B < 10 and (-100 > cQ > -800 ) 
-            and -5000 < cbv1 < 5000 and -5000 < cbv2 < 5000 
-            and -5000 < cbv3 < 5000):
+        if ((disctime - 7) < t0 < (disctime) and 0.5 < beta < 6.0 
+            and 0.0 < A < 5.0 
+            and -20 < cQ < 20 
+            and -20 < cbv1 < 20 and -20 < cbv2 < 20 
+            and -20 < cbv3 < 20):
             return 0.0
         return -np.inf
         
@@ -702,26 +761,38 @@ def stepped_powerlaw(path, targetlabel, t, intensity, error, sector,
     
     #load quaternions and CBVs
     x,y,yerr, tQ, Qall, CBV1, CBV2, CBV3 = generate_clip_quats_cbvs(sector, x, y, yerr,targetlabel, CBV_folder)
-        
+        #adding one to shift up to match the lygos curves
+    Qall +=1
+    CBV1 +=1
+    CBV2 +=1
+    CBV3 +=1
+    
+    
+    
+    if badIndexes is not None:
+        x,y,yerr,tQ,Qall, CBV1, CBV2, CBV3 = clip_all(badIndexes, x,y,yerr,
+                                                      tQ,Qall, CBV1, CBV2, 
+                                                      CBV3)
+        #print(len(x), len(y), len(yerr), len(tQ), len(CBV1), len(CBV2), len(CBV3))
     
     #running MCMC
     np.random.seed(42)   
     nwalkers = 32
-    ndim = 8
-    labels = ["t0", "A", "beta", "B", "cQ", "cbv1", "cbv2", "cbv3"] #, "cQ", "cbv1", "cbv2", "cbv3"
+    ndim = 7
+    labels = ["t0", "A", "beta",  "cQ", "cbv1", "cbv2", "cbv3"] #, "cQ", "cbv1", "cbv2", "cbv3"
     
     
     p0 = np.zeros((nwalkers, ndim)) 
     for n in range(len(p0)):
-        p0[n] = np.array((disctime, 0.1, 1.3, 0.8, 0, 0, 0, 0)) #mean values from before
+        p0[n] = np.array((disctime, 0.1, 1.3,  0, 0, 0, 0)) #mean values from before
 
-    k = np.array((0.1,0.1,0.1,0.1, 500,500,500,500)) * np.random.rand(nwalkers,ndim)
+    k = np.array((0.1,0.1,0.1, 5,5,5,5)) * np.random.rand(nwalkers,ndim)
     p0 += k
     
     sampler = emcee.EnsembleSampler(nwalkers, ndim, log_probability, args=(x, y, yerr, disctime))
     
    # run ONCE
-    sampler.run_mcmc(p0, 20000, progress=True)
+    sampler.run_mcmc(p0, n1, progress=True)
     sampler.get_chain()
     if plot:
         samples = sampler.get_chain()
@@ -744,12 +815,13 @@ def stepped_powerlaw(path, targetlabel, t, intensity, error, sector,
         p0[i] = best_mcmc_inter[0] + 0.1 * np.random.rand(1, ndim)
        
     #sampler.reset()
-    sampler.run_mcmc(p0,40000, progress = True)
+    sampler.run_mcmc(p0,n2, progress = True)
     if plot:
         samples = sampler.get_chain()
-        plot_chain(path, targetlabel, "-burn-in-plot-final.png", samples[20000:], labels, ndim)
+        plot_chain(path, targetlabel, "-burn-in-plot-final.png", samples[n1:], labels, ndim)
     
     flat_samples = sampler.get_chain(discard=6000, thin=15, flat=True)
+    print(len(flat_samples), "samples post second run")
 
     #print out the best fit params based on 16th, 50th, 84th percentiles
     best_mcmc = np.zeros((1,ndim))
@@ -781,15 +853,18 @@ def stepped_powerlaw(path, targetlabel, t, intensity, error, sector,
         t1 = x - best_mcmc[0][0]
         A = best_mcmc[0][1]
         beta = best_mcmc[0][2]
-        B = best_mcmc[0][3]
-        cQ = best_mcmc[0][4]
-        cbv1 = best_mcmc[0][5]
-        cbv2 = best_mcmc[0][6]
-        cbv3 = best_mcmc[0][7]
         
-        best_fit_model = np.heaviside((t1), 1) * A *np.nan_to_num((t1**beta), copy=False) + B + cQ * Qall + cbv1 * CBV1 + cbv2 * CBV2 + cbv3 * CBV3
+        cQ = best_mcmc[0][3]
+        cbv1 = best_mcmc[0][4]
+        cbv2 = best_mcmc[0][5]
+        cbv3 = best_mcmc[0][6]
         
-        nrows = 3
+        best_fit_model = (np.heaviside((t1), 1) * 
+                          A *np.nan_to_num((t1**beta), copy=False) 
+                          + cQ * Qall + cbv1 * CBV1 + cbv2 * CBV2 
+                          + cbv3 * CBV3)
+        
+        nrows = 4
         ncols = 1
         fig, ax = plt.subplots(nrows, ncols, sharex=True,
                                        figsize=(8*ncols * 2, 3*nrows * 2))
@@ -799,8 +874,8 @@ def stepped_powerlaw(path, targetlabel, t, intensity, error, sector,
         for n in range(nrows):
             ax[n].axvline(best_mcmc[0][0], color = 'blue', label="t0")
             ax[n].axvline(disctime, color = 'green', label="discovery time")
-            ax[n].axvline(disctime - 2, color='pink', label="lower t0 prior")
-            ax[n].axvline(disctime + 2, color='pink', ls= 'dashed',label='upper t0 prior')
+            #ax[n].axvline(disctime - 2, color='pink', label="lower t0 prior")
+            #ax[n].axvline(disctime + 2, color='pink', ls= 'dashed',label='upper t0 prior')
             ax[n].set_ylabel("Rel. Flux")
             
         #main
@@ -811,15 +886,40 @@ def stepped_powerlaw(path, targetlabel, t, intensity, error, sector,
         #residuals
         ax[1].set_title("Residual (y-model)")
         residuals = y - best_fit_model
-        ax[1].scatter(x,residuals, s=2, color = 'red')
+        ax[1].scatter(x,residuals, s=2, color = 'black', label='residual')
+        ax[1].axhline(0,color='purple', label="zero")
+        ax[1].legend()
         
         #CBV fits\
         ax[2].set_title("Residuals (y-corrective terms)")
         corrections = cQ*Qall + cbv1 * CBV1 + cbv2 * CBV2 + cbv3 * CBV3
         correction_residuals = y-corrections
-        ax[2].scatter(x, correction_residuals)
+        ax[2].scatter(x, correction_residuals, color='black', s=2, label = "Data - Corrections")
+        ax[2].scatter(x, best_fit_model - corrections, color = 'blue', 
+                      label = "Model - Corrections")
+        ax[2].legend(loc="upper left")
+        
+        
+        #CBV corrections
+    
+        ax[3].scatter(x,y,label="FFI Data", s=2, color = 'gray')
+        #ax[3].scatter(x, (CBV3 * cbv3), label = 'cbv3', color = 'pink')
+        #ax[3].scatter(x, (CBV2 * cbv2), label = 'cbv2', color = 'red')
+        #ax[3].scatter(x, (CBV1 * cbv1), label = 'cbv1', color = 'orange')
+        ax[3].scatter(x,corrections, label = 'all corrections', color = 'lime')
+        ax[3].legend()
         
         plt.savefig(path + targetlabel + "-MCMCmodel-stepped-powerlaw.png")
+        plt.close()
+        
+        plt.scatter(x, CBV1, label="CBV1")
+        plt.scatter(x, CBV2, label="CBV2")
+        plt.scatter(x, CBV3, label="CBV3")
+        plt.xlabel("BJD-" + str(t_starts[targetlabel]))
+        plt.ylabel("relative flux")
+        plt.legend()
+        plt.title("CBVs for Sector " + str(sector))
+        plt.savefig(path + targetlabel + "-CBVs.png")
                 
     with open(best_params_file, 'a') as f:
         for i in range(ndim):
@@ -836,6 +936,8 @@ def stepped_powerlaw(path, targetlabel, t, intensity, error, sector,
         for i in range(ndim):
             f.write(str(lower_error[0][i]) + ",")
         f.write("\n")
+    
+    beep()
     return best_mcmc, upper_error, lower_error
 
 def run_all_discdate(path, all_t, all_i, all_e, all_labels, sector_list, 

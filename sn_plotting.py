@@ -70,3 +70,8 @@ def quicklook_plotall(path, all_t, all_i, all_labels, discovery_dictionary):
             plt.title(all_labels[n])
             plt.savefig(path + all_labels[n] + "-.png")
             plt.close()
+            
+def print_table_formatting(best,upper,lower):
+    for n in range(len(best[0])):
+        print("param ${:.4f}".format(best[0][n]), "^{:.4f}".format(upper[0][n]),
+              "_{:.4f}$".format(lower[0][n]))

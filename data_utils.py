@@ -55,6 +55,90 @@ def load_all_lygos(datapath):
                 
     return all_t, all_i, all_e, all_labels
 
+def eleanor_lc(savepath, RA, DEC, ID, sector):
+    """ 
+    retrieves + produces eleanor light curve
+    """
+    import eleanor
+    from astropy import units as u
+    from astropy.coordinates import SkyCoord
+    import warnings
+    warnings.filterwarnings('ignore')
+    from eleanor.utils import SearchError
+    from scipy.linalg.misc import LinAlgError
+    import os
+    import matplotlib.pyplot as plt
+    
+    download_dir_tesscut = os.path.join(os.path.expanduser('~'), '.eleanor', 'tesscut')
+        
+    download_dir_mastdownload = os.path.join(os.path.expanduser('~'), '.eleanor', 'mastDownload')
+    print(download_dir_tesscut, download_dir_mastdownload)
+      
+    filepath = savepath + ID + "_s" + str(sector) + "_lc.txt"
+                
+    if not os.path.isfile(filepath):
+        try: 
+            coords = SkyCoord(ra=RA, dec=DEC, unit=(u.deg, u.deg))
+            #use 0's to prevent trying to match to a target you don't want
+            files = eleanor.Source(coords=coords, tic=0, gaia = 0, sector=sector)
+            #print("files found: ", len(files))
+            print('Found TIC {0} (Gaia {1}), with TESS magnitude {2}, RA {3}, and Dec {4}'
+                  .format(files.tic, files.gaia, files.tess_mag, files.coords[0], files.coords[1]))
+            #try:
+            data = eleanor.TargetData(files, do_pca=True)
+            q = data.quality == 0
+            
+            timeandflux = np.asarray((data.time[q], data.corr_flux[q]))
+                        
+            plt.scatter(data.time[q], data.raw_flux[q], label = "raw")
+            plt.scatter(data.time[q], data.corr_flux[q], label = "corr")
+            plt.legend(loc = "upper left")
+            plt.show()
+                
+            np.savetxt(filepath, timeandflux)
+  
+        except (SearchError, ValueError):
+            print("******************************")
+            print("Search Error or ValueError occurred")
+            print("******************************")
+        
+        except OSError: 
+            print("******************************")
+            print("Empty or corrupt FITS file")
+            print("******************************")
+        except LinAlgError:
+            print("******************************")
+            print("SVD did not converge")
+            print("******************************")
+        except IndexError:
+            print("******************************")
+            print("Couldn't find these coordinates in")
+            print("******************************")
+        #except TypeError:
+         #   print("******************************")
+          #  print("Issue with internal function while trying to read file")
+           # print("******************************")
+    else:
+        print("Already found this target")
+        
+    for root, dirs, files in os.walk(download_dir_tesscut):
+        for file in files:
+            try: 
+                os.remove(os.path.join(root, file))
+                print("Deleted")
+            except (PermissionError, OSError):
+                #print("Unable to delete", os.path.join(root, file))
+                continue
+    for root, dirs, files in os.walk(download_dir_mastdownload):
+        for file in files:
+            try:
+                os.remove(os.path.join(root, file))
+                print("Deleted")
+            except (PermissionError, OSError):
+                #print("Deleted", os.path.join(root, file))
+                continue
+    
+    return data
 
 
 ######## DATA CLEANING ###########
