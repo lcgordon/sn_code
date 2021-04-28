@@ -172,7 +172,10 @@ def standardize(x, ax=1):
     x = x / stdevs
     return x
 
-
+def flux_standardized(i, e):
+    standardBinnedI = i/i.max()
+    df = ((e/i)**2 + (e[i.argmax()]/i.max())**2)**0.5 * i
+    return standardBinnedI, df
 
 ######### QUATERNION HANDLING ##########
 def convert_to_quat_metafile(file, fileoutput):

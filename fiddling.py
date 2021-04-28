@@ -1,170 +1,11 @@
-
+# -*- coding: utf-8 -*-
 """
-Created on Mon May 18 17:01:26 2020
+Created on Mon Apr 26 19:15:09 2021
 
-@author: Lindsey Gordon 
-
-Updated: May 31 2020
+@author: conta
 """
-
-import numpy as np
-import numpy.ma as ma 
-import pandas as pd 
-import matplotlib.pyplot as plt
-from mpl_toolkits.axes_grid1.inset_locator import (inset_axes, InsetPosition, mark_inset)
-
-from pylab import rcParams
-rcParams['figure.figsize'] = 10,10
-
-rcParams["lines.markersize"] = 2
-from scipy.signal import argrelextrema
-
-
-import astropy
-import astropy.units as u
-from astropy.io import fits
-import scipy.signal as signal
-from astropy.stats import SigmaClip
-from astropy.utils import exceptions
-from astroquery import exceptions
-from astroquery.exceptions import RemoteServiceError
-#from astropy.utils.exceptions import AstropyWarning, RemoteServiceError
-
-from datetime import datetime
-import os
-import shutil
-from scipy.stats import moment, sigmaclip
-
-import sklearn
-from sklearn.cluster import KMeans
-from sklearn.cluster import DBSCAN
-from sklearn.decomposition import PCA
-from sklearn.preprocessing import Normalizer
-from sklearn import metrics
-import fnmatch
-
-from sklearn.metrics import confusion_matrix
-from sklearn.neighbors import LocalOutlierFactor
-
-import astroquery
-from astroquery.simbad import Simbad
-from astroquery.mast import Catalogs
-from astroquery.mast import Observations
-
-
-
-                   
-    #%% HERE
-"""To do: 
-    - rerun fitting to them
-    - do data analysis on the fittings
-    - pick a bunch and deep dive on them!! literally that's all that's left to do bitch!!
-    
-    
-    
-    """
- 
-import sn_functions as sn
-import sn_plotting as sp
-import data_utils as dt
-
-#%% individual load
-#datafolder = "C:/Users/conta/UROP/lightcurves/batch1BEST/"
-datapath = 'C:/Users/conta/UROP/plot_output/IndividualFollowUp/2019yft/'
-savepath = 'C:/Users/conta/UROP/plot_output/IndividualFollowUp/2019yft/'
-all_t, all_i, all_e, all_labels, sector_list, discovery_dictionary, t_starts, gal_mags, info = sn.mcmc_load_lygos(datapath, savepath, runproduce = False)
-
-
-best_params_file = savepath + "best_params.csv"
-ID_file = savepath + "ids.csv"
-upper_errors_file = savepath + "uppererr.csv"
-lower_errors_file = savepath + "lowererr.csv"
-
-#bestParams, upperError, lowerError, sn_names = sn.load_params(savepath)
-
-#badIndexes for 2020efe: 0:100, 628:641
-
-#%% determine bad indexes
-plt.scatter(all_t[0],all_i[0], color = 'red', s=5)
-
-plt.axvline(all_t[0][415])
-plt.axvline(all_t[0][440])
-#plt.axvline(all_t[0][435])
-
-
-
-#badIndexes = np.arange(590,655)
-badIndexes = None #2019yft
-#badIndexes = np.arange(415,440) #2018koy
-#%%
-fig, ax = plt.subplots()
-ax.scatter(absT, absI)
-ax.axvline(absT[58])
-ax.invert_yaxis()
-#%%
-maggie = absI[58]
-import astropy.units as u
-L_0 = 3.0128 * 1e28 * u.W
-lum = L_0 * 10**(-0.4 * maggie)
-
-radnickel = 3.0 * 10**16 * u.erg/u.g
-
-amtnickel = (lum/radnickel).to(u.g/u.s)
-#%% plotting rel flux and abs mag stuff
-
-#key = all_labels[0]
-#apparent_galmag = gal_mags[key[:-4]]
-t = all_t[0]
-i = all_i[0]
-e = all_e[0]
-label = all_labels[0]
-sector = 21
-#yft: 0.069, 17.1
-apparent_galmag = 20.4
-gal_extinction = 0.069
-z = info["Z"][0]
-
-import sn_functions as sn
-
-
-
-(binT, binI, binE, absT, absI, absE) = plot_SN_LCs(savepath, t,i,e,label,sector,
-                                       apparent_galmag,gal_extinction,
-                                       z, badIndexes)
-
-
-#%%
-
-
-RA = info["RA"][0]
-DEC = info["DEC"][0]
-data = dt.eleanor_lc(savepath, RA, DEC, '2019yft',20)
-q = data.quality==0
-plt.scatter(data.time[q], data.raw_flux[q])
-
-
-        #%%
-import sn_plotting as sp
-sp.print_table_formatting(best,upper,lower)
-
-
-
-#%%
-import sn_functions as sn
-#binT40, binI40, binE40 = sn.crop_to_percent(binT, standardBinnedI,df, 0.4)
-savepath = 'C:/Users/conta/UROP/plot_output/IndividualFollowUp/2018koy/40/'
-(best, upper, 
- lower) = stepped_powerlaw_basic(savepath, all_labels[0],
-                                binT, standardBinnedI,df, 
-                                 sector_list[0],
-                     discovery_dictionary, t_starts, best_params_file,
-                     ID_file, upper_errors_file, lower_errors_file, plot = True, 
-                     n1=20000,n2=20000)
-#%%
 def stepped_powerlaw_basic(path, targetlabel, t, intensity, error, sector,
-                     discovery_times, t_starts, best_params_file,
-                     ID_file, upper_errors_file, lower_errors_file,
-                     plot = True, n1=20000, n2=40000):
+                     disctime, plot = True, n1=20000, n2=40000):
     """ Runs MCMC fitting for stepped power law fit
     This is the fitting that matches: Firth 2015 (fireball), Olling 2015, Fausnaugh 2019
     fireball power law with A, beta, B, and t0 floated
@@ -206,7 +47,7 @@ def stepped_powerlaw_basic(path, targetlabel, t, intensity, error, sector,
     def log_prior(theta, disctime):
         """ calculates the log prior value """
         t0, A, beta, B= theta 
-        if ((disctime - 5) < t0 < (disctime + 18) and 0.5 < beta < 4.0 
+        if ((disctime - 10) < t0 < (disctime + 10) and 0.5 < beta < 4.0 
             and -0.1 < A < 2.0 and -5 < B < 5):
             return 0.0
         return -np.inf
@@ -228,7 +69,6 @@ def stepped_powerlaw_basic(path, targetlabel, t, intensity, error, sector,
     x = t
     y = intensity
     yerr = error
-    disctime = discovery_times[targetlabel]
     
     #running MCMC
     np.random.seed(42)   
@@ -327,7 +167,7 @@ def stepped_powerlaw_basic(path, targetlabel, t, intensity, error, sector,
         #main
         ax[0].set_title(targetlabel)
         ax[0].legend(fontsize=8, loc="upper left")
-        ax[nrows-1].set_xlabel("BJD-" + str(t_starts[targetlabel]))
+        ax[nrows-1].set_xlabel("BJD-2457000")
         
         #residuals
         ax[1].set_title("Residual (y-model)")
@@ -339,62 +179,68 @@ def stepped_powerlaw_basic(path, targetlabel, t, intensity, error, sector,
         plt.savefig(path + targetlabel + "-MCMCmodel-stepped-powerlaw.png")
         #plt.close()
         
-                
-    with open(best_params_file, 'a') as f:
-        for i in range(ndim):
-            f.write(str(best_mcmc[0][i]) + ",")
-        f.write("\n")
-    with open(ID_file, 'a') as f:
-        f.write(targetlabel)
-        f.write("\n")
-    with open(upper_errors_file, 'a') as f:
-        for i in range(ndim):
-            f.write(str(upper_error[0][i]) + ",")
-        f.write("\n")
-    with open(lower_errors_file, 'a') as f:
-        for i in range(ndim):
-            f.write(str(lower_error[0][i]) + ",")
-        f.write("\n")
     
-    beep()
+    sn.beep()
     return best_mcmc, upper_error, lower_error
 
-#%% converting the calculated power law into the 
-
-t1 = binT - best[0][0]
-A = best[0][1]
-beta = best[0][2]
-B = best[0][3]
-
-best_fit_model = (np.heaviside((t1), 1) * 
-                  A *np.nan_to_num((t1**beta), copy=False) 
-                  + B)
-
-model_noH = A * np.nan_to_num((binT**beta), copy=False) + B
-
-plt.scatter(binT, best_fit_model)
-plt.scatter(binT, model_noH)
 #%%
-#retesting quaternions
-koyQUATS = "C:/Users/conta/UROP/plot_output/IndividualFollowUp/hlsp_tess-spoc_tess_phot_2-4-s0006_tess_v1_cbv.fits"
-from astropy.io import fits
-
-opened = fits.open(koyQUATS, memmap = False)
-
-times = []
-cbv1 = []
-cbv2 = []
-cbv3 = []
 
 
-for n in range(len(opened[1].data)):
-    times.append(opened[1].data[n][0])
-    cbv1.append(opened[1].data[n][5])
-    cbv2.append(opened[1].data[n][6])
-    cbv3.append(opened[1].data[n][6])
-    
-plt.scatter(times, cbv)
-plt.show()
+      #%%
 import sn_functions as sn
-times, cbv = sn.bin_8_hours_CBV(times, cbv)
-plt.scatter(times, cbv)
+import sn_plotting as sp
+import data_utils as du
+datapath = 'C:/Users/conta/UROP/plot_output/IndividualFollowUp/2018koy/'
+savepath = "C:/Users/conta/UROP/plot_output/IndividualFollowUp/2018koy/full/"
+t,i,e, label, sector, discdate, gal_mags, info = sn.mcmc_load_one(datapath, savepath, runproduce = False)
+
+#conversion and plotting
+#2019yft is 17.1, 0.069
+#2020chi is 20.4, 0.051
+#2018koy is 20.44,0.314
+galmag =20.44
+extinction = 0.314
+z = info["Z"][0]
+#badIndexes = None #2019yft
+#badIndexes = np.concatenate((np.arange(0,100), np.arange(628,641))) #2020efe
+badIndexes = np.arange(415,440) #2018koy
+#badIndexes = np.concatenate((np.arange(906,912), np.arange(645,665))) #2020chi
+binT, binI, binE, absT, absI, absE = sp.plot_SN_LCs(savepath, t,i,e,label,
+                                                    sector,galmag,extinction,
+                                                    z, discdate, badIndexes)
+
+#standardize to 1
+standI, standE = du.flux_standardized(binI, binE)
+
+#%% fULL light curve
+best_params_file = savepath + "best_params.csv"
+ID_file = savepath + "ids.csv"
+upper_errors_file = savepath + "uppererr.csv"
+lower_errors_file = savepath + "lowererr.csv"
+best, upper, lower = stepped_powerlaw_basic(savepath, label, binT, standI, standE, sector,
+                     discdate, best_params_file,
+                     ID_file, upper_errors_file, lower_errors_file,
+                     plot = True, n1=40000, n2=60000)
+
+sp.print_table_formatting(best,upper,lower)
+#%%
+# PARTIAL light curve
+binT40, binI40, binE40 = sn.crop_to_percent(binT, standI,standE, 0.75)
+savepath = datapath + "75/"
+best40, upper40, lower40 = stepped_powerlaw_basic(savepath, label, 
+                                                  binT40, binI40, binE40, 
+                                                  sector,discdate, best_params_file,
+                                                  ID_file, upper_errors_file, lower_errors_file,
+                                                  plot = True, n1=40000, n2=60000)
+
+sp.print_table_formatting(best40,upper40,lower40)
+#%% PARTIAL 2
+binT60, binI60, binE60 = sn.crop_to_percent(binT, standI,standE, 0.6)
+savepath = datapath + "60/"
+best60, upper60, lower60 = stepped_powerlaw_basic(savepath, label, 
+                                                  binT60, binI60, binE60, 
+                                                  sector,discdate, best_params_file,
+                                                  ID_file, upper_errors_file, lower_errors_file,
+                                                  plot = True, n1=40000, n2=60000)
+
+sp.print_table_formatting(best60,upper60,lower60)

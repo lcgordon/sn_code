@@ -39,7 +39,7 @@ import data_utils as du
   
 ####### CROSS MATCHING ######
     
-def run_all_TNS_TESSCUT(savefolder, tessdates_csv, sector=1):
+def run_all_TNS(savefolder, tessdates_csv, sector=1):
     """ Runs cross_check_TNS_with_TESSCUT() for all sectors using the dates per
     sector provided by TESS. Saves each file into the given save folder
     Parameters:
@@ -55,12 +55,12 @@ def run_all_TNS_TESSCUT(savefolder, tessdates_csv, sector=1):
         end = tessdates["End UTC"][n+1].split(" ")[0]
         print(sector)
         print(start, end)
-        info, obs = cross_check_TNS_with_TESSCUT(savefolder, sector, start, end)
+        info, obs = download_TNS(savefolder, sector, start, end)
         sector += 1
         n += 2
     return
 
-def cross_check_TNS_with_TESSCUT(savepath, sector, sector_start, sector_end):
+def download_TNS(savepath, sector, sector_start, sector_end):
     """" For a given sector's date range, retrieves the TNS results and then 
     cross-matches all positions against TESSCUT. Saves only the ones that were 
     observed during their discovery date. 
@@ -93,32 +93,7 @@ def cross_check_TNS_with_TESSCUT(savepath, sector, sector_start, sector_end):
             #concatenate
             info = pd.concat((info, pand))
     
-    #run each set of coordinates into tesscut
-    observed_targets = pd.DataFrame(columns = info.columns)
-    from astroquery.mast import Tesscut
-    from astropy.coordinates import SkyCoord
-    import warnings
-    import astropy.units as u
-
-    with warnings.catch_warnings():
-        for n in range(len(info)):#for each entry
-            coord = SkyCoord(info["RA"][n], info["DEC"][n], unit=(u.hourangle, u.deg))
-            sector_table = Tesscut.get_sectors(coordinates=coord)
-            #print(sector_table)
-            
-            #check each table item
-            for i in range(len(sector_table)):
-                if sector_table["sector"][i] == sector or sector_table["sector"][i] == sector - 1:
-                    #if in this sector or the previous one, add to list of ones to save   
-                    #if observed_targets.empty:
-                     #   observed_targets = info[n]
-                    #else:
-                    observed_targets = observed_targets.append(info.iloc[[n]])
-    
-    savefile = savepath + filelabel + "-crossmatched.csv"
-    observed_targets.to_csv(savefile)
-            
-    return info, observed_targets
+    return info
 
 
 
@@ -156,6 +131,19 @@ def compile_csvs(folder, suffix, savefilename = None, sector = False):
         all_info.to_csv(folder + savefilename + ".csv", index=False)
         
     return all_info.reset_index()
+
+def only_Ia_20_mag(sn_list, output):
+    """Clears out all sn from a list that are not Ia and brighter than 22nd magnitude
+    at time of detection"""
+    cleaned_targets = pd.DataFrame(columns = sn_list.columns)
+    for n in range(len(sn_list) -1):
+        if sn_list["Obj. Type"][n] == "SN Ia" and sn_list["Discovery Mag/Flux"][n] <= 20:
+            cleaned_targets = cleaned_targets.append(sn_list.iloc[[n]])
+            
+    cleaned_targets.reset_index(inplace = True, drop=True)   
+    #del cleaned_targets['index']     
+    cleaned_targets.to_csv(output, index=False)
+    return cleaned_targets
 
 def prep_WTV_file(tnsfile, outputfile):
     """This converts all RA and DEC in an input pandas-readable CSV file
@@ -208,18 +196,7 @@ def process_WTV_results(all_tns, WTV_values, output_file):
     WTV_confirmed.to_csv(output_file, index=False)
     return WTV_confirmed
 
-def only_Ia_20_mag(sn_list, output):
-    """Clears out all sn from a list that are not Ia and brighter than 22nd magnitude
-    at time of detection"""
-    cleaned_targets = pd.DataFrame(columns = sn_list.columns)
-    for n in range(len(sn_list) -1):
-        if sn_list["Obj. Type"][n] == "SN Ia" and sn_list["Discovery Mag/Flux"][n] <= 20:
-            cleaned_targets = cleaned_targets.append(sn_list.iloc[[n]])
-            
-    cleaned_targets.reset_index(inplace = True, drop=True)   
-    #del cleaned_targets['index']     
-    cleaned_targets.to_csv(output, index=False)
-    return cleaned_targets
+#################### OTHER CSV/LIST HANDLING
 
 def produce_lygos_list(sn_list, output):
     """Saves just target names + RA/DEC values """
@@ -442,8 +419,8 @@ def preclean_mcmc(file):
     ints[clipped_inds] = mean #reset those values to the mean value (or remove??)
     
     
-    t_sub = t - t.min() #put the start at 0 for better curve fitting
-    
+    #t_sub = t - t.min() #put the start at 0 for better curve fitting
+    t_sub = t - 2457000 #put in BJD
     #ints = df.normalize(ints, axis=0)
     
     return t_sub, ints, error, t.min()
@@ -504,6 +481,24 @@ def bin_8_hours_TIE(t, i, e):
         m+= n_points
         
     return np.asarray(binned_t), np.asarray(binned_i), np.asarray(binned_e)
+
+def bin_8_hours_CBV(t,CBV):
+    n_points = 16
+    binned_t = []
+    binned_i = []
+    n = 0
+    m = n_points
+        
+    while m <= len(t):
+        bin_t = t[n + 8] #get the midpoint of this data as the point to plot at
+        binned_t.append(bin_t) #put into new array
+        bin_i = np.nanmean(CBV[n:m]) #bin the stretch
+        binned_i.append(bin_i) #put into new array
+            
+        n+= n_points
+        m+= n_points
+        
+    return np.asarray(binned_t), np.asarray(binned_i)
 
 def crop_to_percent(t, y, err, fraction):
     """ only fit first 40% of brightness of curve"""
@@ -611,7 +606,7 @@ def generate_clip_quats_cbvs(sector, x, y, yerr, targetlabel, CBV_folder):
 
 
 
-############### BAYESIAN CURVE FITS ##############
+############### LOAD FILES ##############
 def mcmc_load_lygos(datapath, savepath, runproduce = False):
     """ Opens all Lygos files and loads them in.
     label_use = 1: filenames like: rflxtarg_2018eod_0114_30mn.csv
@@ -680,7 +675,54 @@ def mcmc_load_lygos(datapath, savepath, runproduce = False):
     #beep()
     return all_t, all_i, all_e, all_labels, sector_list, discovery_dictionary, t_starts, gal_mags, info
 
+def mcmc_load_one(datapath, savepath, runproduce = False):
+    infofile = datapath + "TNS_information.csv"
 
+    for root, dirs, files in os.walk(datapath):
+        for name in files:
+            if name.startswith(("rflx")):
+                filepath = root + "/" + name
+                labely = name.split("_")
+                
+                if len(labely) == 4:
+                    label = labely[1]+labely[2]
+                    sector = labely[2][0:2]
+                elif len(labely) == 6:
+                    label = labely[1][2:]+labely[3]
+                    sector = labely[3][0:2]
+                
+                
+                if int(sector) >= 27:
+                    print("Sector out of bounds")
+                    continue
+                    #skip to next one
+                else:
+                    import data_utils as du
+                    t,i,e = du.load_lygos_csv(filepath)
+                    mean = np.mean(i)
+                    
+                    sigclip = SigmaClip(sigma=4, maxiters=None, cenfunc='median')
+                    clipped_inds = np.nonzero(np.ma.getmask(sigclip(i)))
+                    i[clipped_inds] = mean #reset those values to the mean value (or remove??)
+                    
+                    
+                    t = t - 2457000
+    if runproduce:
+        #print(sn_names[0:10])
+        if not os.path.isfile(infofile):
+            retrieve_all_TNS_and_NED(datapath, sn_names) 
+        else:
+            print("TNS file already exists")
+    
+    info = pd.read_csv(infofile)
+    from astropy.time import Time
+    discotime = Time(info["DISCDATE"][0], format = 'iso', scale='utc')
+    discovery_date = discotime.jd - 2457000
+    gal_mags = info["GALMAG"][0]
+
+    return t, i, e, label, sector, discovery_date, gal_mags, info
+
+############################ CURVE FITS
 def stepped_powerlaw(path, targetlabel, t, intensity, error, sector,
                      discovery_times, t_starts, best_params_file,
                      ID_file, upper_errors_file, lower_errors_file,
