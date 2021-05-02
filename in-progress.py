@@ -133,16 +133,6 @@ import sn_functions as sn
                                        z, badIndexes)
 
 
-#%%
-
-
-RA = info["RA"][0]
-DEC = info["DEC"][0]
-data = dt.eleanor_lc(savepath, RA, DEC, '2019yft',20)
-q = data.quality==0
-plt.scatter(data.time[q], data.raw_flux[q])
-
-
         #%%
 import sn_plotting as sp
 sp.print_table_formatting(best,upper,lower)
@@ -376,25 +366,141 @@ plt.scatter(binT, best_fit_model)
 plt.scatter(binT, model_noH)
 #%%
 #retesting quaternions
-koyQUATS = "C:/Users/conta/UROP/plot_output/IndividualFollowUp/hlsp_tess-spoc_tess_phot_2-4-s0006_tess_v1_cbv.fits"
+import sn_functions as sn
+yftQUATS = "C:/Users/conta/UROP/plot_output/IndividualFollowUp/2018koy/hlsp_tess-spoc_tess_phot_2-4-s0006_tess_v1_cbv.fits"
 from astropy.io import fits
 
-opened = fits.open(koyQUATS, memmap = False)
+opened = fits.open(yftQUATS, memmap = False)
 
 times = []
 cbv1 = []
 cbv2 = []
 cbv3 = []
 
-
+#rcParams['figure.figsize'] = 8,3
 for n in range(len(opened[1].data)):
     times.append(opened[1].data[n][0])
     cbv1.append(opened[1].data[n][5])
     cbv2.append(opened[1].data[n][6])
-    cbv3.append(opened[1].data[n][6])
+    cbv3.append(opened[1].data[n][7])
     
-plt.scatter(times, cbv)
-plt.show()
-import sn_functions as sn
-times, cbv = sn.bin_8_hours_CBV(times, cbv)
-plt.scatter(times, cbv)
+opened.close()
+
+times1, cbv1 = sn.bin_8_hours_CBV(times, cbv1)
+
+
+times2, cbv2 = sn.bin_8_hours_CBV(times, cbv2)
+
+
+times3, cbv3 = sn.bin_8_hours_CBV(times, cbv3)
+
+nrows = 3
+ncols = 1
+fig, ax = plt.subplots(nrows, ncols, sharex=True, 
+                       figsize=(8*ncols, 3*nrows))
+ax[0].plot(times1, cbv1)
+ax[0].set_title("Sector 6 Camera 2 CCD 4 CBV1")
+ax[1].plot(times2, cbv2 )
+ax[1].set_title("Sector 6 Camera 2 CCD 4 CBV2")
+ax[2].plot(times3, cbv3 )
+ax[2].set_title("Sector 6 Camera 2 CCD 4 CBV3")
+ax[nrows-1].set_xlabel("BJD-2457000")
+plt.savefig("C:/Users/conta/UROP/plot_output/IndividualFollowUp/2018koy/cbvs.png")
+
+
+
+#%%
+
+#fixing background on 2018koy
+
+datapath = 'C:/Users/conta/UROP/plot_output/IndividualFollowUp/2018koy/'
+savepath = "C:/Users/conta/UROP/plot_output/IndividualFollowUp/2018koy/"
+(t,i,e, label, sector, 
+ discdate, gal_mags, info) = sn.mcmc_load_one(datapath, savepath, 
+                                              runproduce = False)
+#%%
+
+savepath_lc = "C:/Users/conta/UROP/plot_output/IndividualFollowUp/2018koy/"
+RA = info["RA"][0]
+DEC = info["DEC"][0]
+data = du.eleanor_lc(savepath_lc, RA, DEC, '2018koy',6)
+q = data.quality==0
+
+#%%
+#plt.scatter(data.time[q], data.raw_flux[q])
+plt.plot(data.time, data.flux_bkg, 'k', label='1D postcard', linewidth=3)
+plt.plot(data.time, data.tpf_flux_bkg, 'r--', label='1D TPF', linewidth=2)
+#%%
+fig, (ax1, ax2) = plt.subplots(ncols=2, figsize=(10,4))
+ax1.imshow(data.tpf[0])
+ax1.set_title('Target Pixel File')
+ax2.imshow(data.bkg_tpf[0])
+ax2.set_title('2D interpolated background')
+#%%
+fig, (ax1, ax2) = plt.subplots(ncols=2, figsize=(30,12))
+ax1.imshow(data.tpf[0])
+ax1.set_title('Target Pixel File')
+ax2.imshow(data.aperture)
+ax2.set_title('Aperture');
+
+
+#%%
+import eleanor
+vis = eleanor.Visualize(data)
+
+
+#%%
+eleanor.TargetData.custom_aperture(data, shape='circle', 
+                                   r=1, pos=[7,4], method='exact')
+eleanor.TargetData.get_lightcurve(data)
+
+fig, (ax1, ax2) = plt.subplots(ncols=2, figsize=(15,4), 
+                               gridspec_kw={'width_ratios':[1,3]})
+ax1.imshow(data.tpf[0])
+ax1.imshow(data.aperture, cmap='Greys', alpha=0.5)
+ax1.set_title('Aperture over TPF')
+
+#plt.imshow(data.aperture)
+
+ax2.plot(data.time[q], data.raw_flux[q]/np.nanmedian(data.raw_flux[q]), 'k', label='Raw')
+ax2.plot(data.time[q], data.corr_flux[q]/np.nanmedian(data.corr_flux[q]) - 0.015, 'r', label='Corrected')
+ax2.legend()
+ax2.set_xlabel('Time [BJD - 2457000]')
+ax2.set_ylabel('Normalized Flux');
+
+#%%
+file = "C:/Users/conta/Downloads/MAST_2021-05-01T1836/HLSP/hlsp_eleanor_tess_ffi_postcard-s0006-2-4-cal-1196-1240_tess_v2_pc/hlsp_eleanor_tess_ffi_postcard-s0006-2-4-cal-1196-1240_tess_v2_pc.fits"
+
+filey = fits.open(file, memmap=False)
+
+
+#%%
+from astropy.wcs import WCS
+wicks = WCS(filey[1].header)
+
+#%%
+plt.imshow(filey[2].data[0])
+
+#%%
+from astropy.coordinates import SkyCoord
+ra = info["RA"][0]
+dec = info["DEC"][0]
+pixCoords=SkyCoord(ra, dec, frame='fk5', 
+                   unit=u.deg).to_pixel(wcs=wicks, mode='all')
+fig = plt.figure(figsize=(10,10))                        #plotting only quasars that lie in image
+fig.add_subplot(111, projection=wicks)
+plt.xlim(pixCoords[0]-10, pixCoords[0]+10)
+plt.ylim(pixCoords[1]-10, pixCoords[1]+10)
+plt.imshow(filey[2].data[0], origin='lower', cmap='gray',clim=(0,.99))
+plt.xlabel('RA')
+plt.ylabel('Dec')
+plt.grid(color='white', ls='solid')
+#plt.contour(hdu.data, levels=[.1,.5,1,4,7,10,20], cmap='cool', alpha=0.5)
+
+#pixCoords=np.concatenate(pixCoords)            #cropping image to only quasar
+
+
+
+
+
+

@@ -42,7 +42,7 @@ def blackbody(lam, T):
         T = T * u.K
         return(( 2*const.h*const.c**2 / (lam**5 * 
                 (np.exp(const.h*const.c / (lam*const.k_B*T)) - 1)
-                )).to(u.J/(u.s * u.Angstrom**3))).value
+                )).to(u.erg/u.s/u.cm**2/u.Angstrom).value)
 
 def fit_bb(path, wave, flux, label, p0 = 10000):
     """Fit a blackbody curve to the spectra. 
@@ -55,7 +55,7 @@ def fit_bb(path, wave, flux, label, p0 = 10000):
     
 
     #wave = wave.to(u.Angstrom) # set into units
-    flux = flux.to((u.J/(u.s * u.Angstrom**3)))
+    flux = flux.to(u.erg/u.s/u.cm**2/u.Angstrom)
     wave2 = wave.to(u.m).value #converting to m for use in bb function
     
     #run curve fit
@@ -71,13 +71,22 @@ def fit_bb(path, wave, flux, label, p0 = 10000):
     plt.plot(wave, model, label="best fit model", color = 'red')
     
     plt.xlabel("Wavelength (Angstrom)")
-    plt.ylabel("Spectral Flux (J/sA^3)")
+    plt.ylabel("Spectral Flux (u.erg/u.s/u.cm2/u.Angstrom)")
     plt.title(label + " Spectra. Blackbody best fit T= %.1f K" % coeff[0])
     plt.legend(loc="upper right")
     plt.tight_layout()
     plt.savefig(spectra_folder + label + "_bbfit.png")
+    plt.close()
 
     return coeff, covar, sigma
+
+def calc_tmin(L, T, Vph):
+    """
+    L in erg/s
+    T in K
+    Vph in km/s"""
+    return (4.3 * ((L/(1e42 * u.erg/u.s))**0.5) * 
+            ((T/(1e4 * u.K))**(-2)) * (Vph/(1e4 * u.km/u.s))**(-1))
 
 #%% velocity calculations
 #rest_wavelength = 4000 #2018koy
@@ -86,11 +95,11 @@ def fit_bb(path, wave, flux, label, p0 = 10000):
 #rest_wavelength = 6000 #2019yft
 #observed_wavelength = 6450 #2019yft
 
-rest_wavelength = 6000#2020chi
-observed_wavelength = 6420#2020chi
+rest_wavelength = 6500#2020chi
+observed_wavelength = 6701#2020chi
 
 vel = photosphere_vel(rest_wavelength, observed_wavelength)
-print(vel, vel/1e7)
+print(vel, vel/1e6)
 
 #%% black body fitting
 #loading 2020chi - this runs no problem! 
@@ -103,12 +112,14 @@ wave2020chi = wave2020chi * u.Angstrom
 flux2020chi = flux2020chi * u.J/(u.s * u.Angstrom**3)
 fit_bb(spectra_folder, wave2020chi, flux2020chi, "2020chi")
 
+#%%
 #2020koy - fixed issue
-file2018koy = "C:/Users/conta/UROP/plot_output/IndividualFollowUp/spectra/tns_2018koy_2018-12-31_05-17-41_ESO-NTT_EFOSC2-NTT_ePESSTO.asci"
+file2018koy = "C:/Users/conta/UROP/plot_output/IndividualFollowUp/spectra/tns_2018koy_2018-12-24_07-31-33_P60_SEDM_ZTF.ascii"
 
 wave2018koy, flux2018koy = load_ascii_spectra(file2018koy)
 wave2018koy = wave2018koy * u.Angstrom
-flux2018koy = flux2018koy * u.J/(u.s * u.Angstrom**3)
+#flux2018koy = flux2018koy * u.J/(u.s * u.Angstrom**3)
+flux2018koy = flux2018koy * u.erg/u.s/u.cm**2/u.Angstrom
 
 fit_bb(spectra_folder, wave2018koy, flux2018koy, "2018koy")
 
@@ -141,17 +152,28 @@ L_0 = 3.0128 * 10**28 * u.W
 L2019yft = L_0 * 10**(-0.4*absIatTime)
 
 
-def calc_tmin(L, T, Vph):
-    """
-    L in erg/s
-    T in K
-    Vph in km/s"""
-    return (4.3 * ((L/(1e42 * u.erg/u.s))**0.5) * 
-            ((T/(1e4 * u.K))**(-2)) * (Vph/(1e4 * u.km/u.s))**(-1))
+
 
 tmin2019yft = calc_tmin(L2019yft.to(u.erg/u.s), T2019yft, vel2019yft.to(u.km/u.s))
 
 #%% for 2020chi
+
+datapath = 'C:/Users/conta/UROP/plot_output/IndividualFollowUp/2020chi/'
+savepath = "C:/Users/conta/UROP/plot_output/IndividualFollowUp/2020chi/full/"
+(t,i,e, label, sector, 
+ discdate, gal_mags, info) = sn.mcmc_load_one(datapath, savepath, 
+                                              runproduce = False)
+                                              
+galmag = 20.44
+extinction = 0.051
+z = info["Z"][0]
+badIndexes = np.concatenate((np.arange(906,912), np.arange(645,665))) #2020chi
+binT, binI, binE, absT, absI, absE = sp.plot_SN_LCs(savepath, t,i,e,label,
+                                                    sector,galmag,extinction,
+                                                    z, discdate, badIndexes)
+
+#standardize to 1
+standI, standE = du.flux_standardized(binI, binE)
 
 classDate2020chi = Time("2020-02-14 12:16:05", format='iso', scale='utc')
 
@@ -165,7 +187,7 @@ plt.axvline(discdate, color = 'red')
 plt.axvline(classDate2020chi.jd-2457000-8.5242)
 ax.invert_yaxis()
 #%%
-absIatTime = -19.25
+absIatTime = -19.25 * 1.15
 L_0 = 3.0128 * 10**28 * u.W
 L2020chi = L_0 * 10**(-0.4*absIatTime)
 print(L2020chi.to(u.erg/u.s))
@@ -178,19 +200,22 @@ print(tmin2020chi)
 
 
 #%% 2018koy
-classDate2018koy = Time("2018-12-31 05:17:41", format='iso', scale='utc')
+from astropy.time import Time
+classDate2018koy = Time("2018-12-24 07:31:33", format='iso', scale='utc')
 
 vel2018koy = 9.3 * 10**6 * u.m/u.s #m/s
-T2018koy = 13900 * u.K#Kelvin
+T2018koy = 300 * u.K#Kelvin
 
 fig, ax = plt.subplots()
 ax.scatter(absT, absI)
 ax.axvline(classDate2018koy.jd-2457000, color='green')
 plt.axvline(discdate, color = 'red')
+plt.axvline(absT[12], color = 'pink')
 #plt.axvline(classDate2018koy.jd-2457000-8.5242)
 ax.invert_yaxis()
+
 #%%
-absIatTime = -16.70
+absIatTime = -17.89 
 L_0 = 3.0128 * 10**28 * u.W
 L2018koy = L_0 * 10**(-0.4*absIatTime)
 print(L2018koy.to(u.erg/u.s))

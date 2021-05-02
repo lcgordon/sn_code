@@ -9,6 +9,56 @@ SN Plotting
 import matplotlib.pyplot as plt
 import numpy as np
 
+def plot_mcmc(path, x, y, targetlabel, disctime, best_mcmc, flat_samples,
+              labels):
+    import corner
+    fig = corner.corner(
+        flat_samples, labels=labels,
+        quantiles = [0.16, 0.5, 0.84],
+                       show_titles=True,title_fmt = ".4f", 
+                       title_kwargs={"fontsize": 12}
+    );
+    fig.savefig(path + targetlabel + 'corner-plot-params.png')
+    plt.show()
+    plt.close()
+     
+    #best fit model
+    t1 = x - best_mcmc[0][0]
+    A = best_mcmc[0][1]
+    beta = best_mcmc[0][2]
+    B = best_mcmc[0][3]
+    
+    best_fit_model = (np.heaviside((t1), 1) * 
+                      A *np.nan_to_num((t1**beta), copy=False) 
+                      + B)
+    
+    nrows = 2
+    ncols = 1
+    fig, ax = plt.subplots(nrows, ncols, sharex=True,
+                                   figsize=(8*ncols * 2, 3*nrows * 2))
+    
+    ax[0].plot(x, best_fit_model, label="best fit model", color = 'red')
+    ax[0].scatter(x, y, label = "FFI data", s = 5, color = 'black')
+    for n in range(nrows):
+        ax[n].axvline(best_mcmc[0][0], color = 'blue', label="t0")
+        ax[n].axvline(disctime, color = 'green', label="discovery time")
+        ax[n].set_ylabel("Rel. Flux")
+        
+    #main
+    ax[0].set_title(targetlabel)
+    ax[0].legend(fontsize=8, loc="upper left")
+    ax[nrows-1].set_xlabel("BJD-2457000")
+    
+    #residuals
+    ax[1].set_title("Residual (y-model)")
+    residuals = y - best_fit_model
+    ax[1].scatter(x,residuals, s=5, color = 'black', label='residual')
+    ax[1].axhline(0,color='purple', label="zero")
+    ax[1].legend()
+    
+    plt.savefig(path + targetlabel + "-MCMCmodel-stepped-powerlaw.png")
+    return
+
 def plot_histogram(data, bins, x_label, filename):
     """ 
     Plot a histogram with one light curve from each bin plotted on top
@@ -76,7 +126,8 @@ def print_table_formatting(best,upper,lower):
         print("param ${:.4f}".format(best[0][n]), "^{:.4f}".format(upper[0][n]),
               "_{:.4f}$".format(lower[0][n]))
         
-def plot_SN_LCs(path, t,i,e,label,sector,galmag,extinction, z, discdate, badIndexes):
+def plot_SN_LCs(path, t,i,e,label,sector,galmag,extinction, z, 
+                discdate, badIndexes):
 
     import sn_functions as sn
     
@@ -143,7 +194,7 @@ def plot_SN_LCs(path, t,i,e,label,sector,galmag,extinction, z, discdate, badInde
         
     ax[nrows-1].set_xlabel("BJD-2457000")
     
-
+    plt.tight_layout()
     plt.savefig(path + label + "flux-plot.png")
     plt.show()
     #plt.close()

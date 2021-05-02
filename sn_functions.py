@@ -982,6 +982,135 @@ def stepped_powerlaw(path, targetlabel, t, intensity, error, sector,
     beep()
     return best_mcmc, upper_error, lower_error
 
+def stepped_powerlaw_basic(path, targetlabel, t, intensity, error, sector,
+                     disctime, plot = True, n1=20000, n2=40000):
+    """ Runs MCMC fitting for stepped power law fit
+    This is the fitting that matches: Firth 2015 (fireball), Olling 2015, Fausnaugh 2019
+    fireball power law with A, beta, B, and t0 floated
+    t1 = t - t0
+    F = A(t1)**beta + B + corrections
+    Runs two separate chains to hopefully hit convergence
+    Params:
+            - path to save into
+            - targetlabel for file names
+            - time axis
+            - intensities
+            - errors
+            - sector number 
+            - discovery time
+            - plot (true/false)
+            - n1 = steps in first chain
+            - n2 = steps in second chain
+    
+    """
+
+    def log_likelihood(theta, x, y, yerr):
+        """ calculates the log likelihood function. 
+        constrain beta between 0.5 and 4.0
+        A is positive
+        only fit up to 40% of the flux"""
+        t0, A, beta, B = theta 
+        t1 = x - t0
+        model = (np.heaviside((t1), 1) * A *np.nan_to_num((t1**beta)) + B)
+        
+        yerr2 = yerr**2.0
+        returnval = -0.5 * np.nansum((y - model) ** 2 / yerr2 + np.log(yerr2))
+        return returnval
+    
+    def log_prior(theta, disctime):
+        """ calculates the log prior value """
+        t0, A, beta, B= theta 
+        if ((disctime - 10) < t0 < (disctime-1) and 0.7 < beta < 4.0 
+            and -0.1 < A < 2.0 and -5 < B < 5):
+            return 0.0
+        return -np.inf
+        
+        #log probability
+    def log_probability(theta, x, y, yerr, disctime):
+        """ calculates log probabilty"""
+        lp = log_prior(theta,disctime)
+            
+        if not np.isfinite(lp) or np.isnan(lp): #if lp is not 0.0
+            return -np.inf
+        
+        return lp + log_likelihood(theta, x, y, yerr)
+    
+    import matplotlib.pyplot as plt
+    import emcee
+    rcParams['figure.figsize'] = 16,6
+     
+    x = t
+    y = intensity
+    yerr = error
+    
+    #running MCMC
+    np.random.seed(42)   
+    nwalkers = 32
+    ndim = 4
+    labels = ["t0", "A", "beta",  "B"]
+    
+    p0 = np.zeros((nwalkers, ndim)) 
+    for n in range(len(p0)):
+        p0[n] = np.array((disctime-3, 0.1, 1.8, 1)) #mean values from before
+
+    p0 += (np.array((0.1,0.1,0.1, 0.1)) * np.random.rand(nwalkers,ndim))
+    
+    sampler = emcee.EnsembleSampler(nwalkers, ndim, log_probability, args=(x, y, yerr, disctime))
+    
+   # run ONCE
+    sampler.run_mcmc(p0, n1, progress=True)
+    sampler.get_chain()
+    if plot:
+        samples = sampler.get_chain()
+        plot_chain(path, targetlabel, "-burn-in-plot-intermediate.png", samples, labels, ndim)
+    
+    
+    flat_samples = sampler.get_chain(discard=6000, thin=15, flat=True)
+    
+    #get intermediate best
+    best_mcmc_inter = np.zeros((1,ndim))
+    for i in range(ndim):
+        mcmc = np.percentile(flat_samples[:, i], [16, 50, 84])
+        best_mcmc_inter[0][i] = mcmc[1]
+        
+
+    #reset p0 and run again
+    np.random.seed(50)
+    p0 = np.zeros((nwalkers, ndim))
+    for i in range(nwalkers):
+        p0[i] = best_mcmc_inter[0] + 0.1 * np.random.rand(1, ndim)
+       
+    #sampler.reset()
+    sampler.run_mcmc(p0,n2, progress = True)
+    if plot:
+        samples = sampler.get_chain()
+        plot_chain(path, targetlabel, "-burn-in-plot-final.png", samples[n1:], labels, ndim)
+    
+    flat_samples = sampler.get_chain(discard=1000, thin=15, flat=True)
+    #print(len(flat_samples), "samples post second run")
+
+    #print out the best fit params based on 16th, 50th, 84th percentiles
+    best_mcmc = np.zeros((1,ndim))
+    upper_error = np.zeros((1,ndim))
+    lower_error = np.zeros((1,ndim))
+    for i in range(ndim):
+        mcmc = np.percentile(flat_samples[:, i], [16, 50, 84])
+        q = np.diff(mcmc)
+        print(labels[i], mcmc[1], -1 * q[0], q[1] )
+        best_mcmc[0][i] = mcmc[1]
+        upper_error[0][i] = q[1]
+        lower_error[0][i] = q[0]
+ 
+    
+    if plot:
+        import sn_plotting as sp
+        sp.plot_mcmc(path, x, y, targetlabel, disctime, best_mcmc, flat_samples,
+                     labels)
+        
+    
+    sn.beep()
+    return flat_samples, best_mcmc, upper_error, lower_error
+
 def run_all_discdate(path, all_t, all_i, all_e, all_labels, sector_list, 
                         discovery_dictionary, t_starts, best_params_file,
                         ID_file, upper_errors_file, lower_errors_file,
