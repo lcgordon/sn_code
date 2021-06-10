@@ -35,6 +35,7 @@ from astropy.stats import SigmaClip
 from astropy.utils import exceptions
 
 import data_utils as du
+import sn_plotting as sp
 
   
 ####### CROSS MATCHING ######
@@ -368,16 +369,19 @@ def conv_to_abs_mag(t, i, e, galmag, z, extinction = None):
     i1 = np.delete(i1, nan_array)
     t1 = np.delete(t1, nan_array)
     e1 = np.delete(e1, nan_array)
-    #convert
+    #convert to apparent mag
     apparent_mag = -2.5* np.log10(i1) + galmag
-    if extinction is not None:
-        apparent_mag += extinction
+    #conver to absolute mag
     M = apparent_mag + 5 - 5*np.log10(d.value)
+    #apply galactic extinction
+    if extinction is not None:
+        M -= extinction
     
     #calculating error in apparent magnitudes
-    #apparent_e = apparent_mag - apparentmag of (i+e) (called a)
+    #apparent mag of error in flux
     a = -2.5* np.log10(i1+np.absolute(e1)) + galmag
-    
+    #then convert to actual numbers using the real apparent mag
+    #apparent_e = apparent_mag - apparentmag of (i+e) (called a)
     apparent_e = a - apparent_mag
     
     #and then the same for abs mag:
@@ -607,6 +611,82 @@ def generate_clip_quats_cbvs(sector, x, y, yerr, targetlabel, CBV_folder):
 
 
 ############### LOAD FILES ##############
+def load_2018koy():
+    datapath = 'C:/Users/conta/UROP/plot_output/IndividualFollowUp/2018koy/'
+    savepath = "C:/Users/conta/UROP/plot_output/IndividualFollowUp/2018koy/"
+    (t,i,e, label, sector, 
+     discdate, gal_mags, info) = mcmc_load_one(datapath, savepath, 
+                                              runproduce = False)
+    galmag = 18
+    extinction = 0.233
+    z = info["Z"][0]
+    badIndexes = np.arange(415,440) #2018koy
+    binT, binI, binE, absT, absI, absE = sp.plot_SN_LCs(savepath, t,i,e,label,
+                                                    sector,galmag,extinction,
+                                                    z, discdate, badIndexes)
+
+    #standardize to 1
+    standI, standE = du.flux_standardized(binI, binE)
+    return (datapath, savepath, t,i,e, label, sector, discdate, gal_mags, 
+            info, binT, binI, binE, absT, absI, absE, standI, standE)
+ 
+ 
+def load_2019yft():
+    datapath = 'C:/Users/conta/UROP/plot_output/IndividualFollowUp/2019yft/'
+    savepath = "C:/Users/conta/UROP/plot_output/IndividualFollowUp/2019yft/"
+    (t,i,e, label, sector, 
+     discdate, gal_mags, info) = mcmc_load_one(datapath, savepath, 
+                                              runproduce = False)
+    galmag = 19.351
+    extinction = 0.051
+    z = info["Z"][0]
+    badIndexes = None  #2019yft
+    binT, binI, binE, absT, absI, absE = sp.plot_SN_LCs(savepath, t,i,e,label,
+                                                    sector,galmag,extinction,
+                                                    z, discdate, badIndexes)
+
+    #standardize to 1
+    standI, standE = du.flux_standardized(binI, binE)
+    return (datapath, savepath, t,i,e, label, sector, discdate, gal_mags, 
+            info, binT, binI, binE, absT, absI, absE, standI, standE)   
+
+def load_2020chi():
+    datapath = 'C:/Users/conta/UROP/plot_output/IndividualFollowUp/2020chi/'
+    savepath = "C:/Users/conta/UROP/plot_output/IndividualFollowUp/2020chi/"
+    (t,i,e, label, sector, 
+     discdate, gal_mags, info) = mcmc_load_one(datapath, savepath, 
+                                              runproduce = False)
+    galmag = 19.882
+    extinction = 0.038
+    z = info["Z"][0]
+    badIndexes = np.concatenate((np.arange(906,912), np.arange(645,665)))
+    binT, binI, binE, absT, absI, absE = sp.plot_SN_LCs(savepath, t,i,e,label,
+                                                    sector,galmag,extinction,
+                                                    z, discdate, badIndexes)
+
+    #standardize to 1
+    standI, standE = du.flux_standardized(binI, binE)
+    return (datapath, savepath,t,i,e, label, sector, discdate, gal_mags, 
+            info, binT, binI, binE, absT, absI, absE, standI, standE) 
+
+def load_2020efe():
+    datapath = 'C:/Users/conta/UROP/plot_output/IndividualFollowUp/2020efe/'
+    savepath = "C:/Users/conta/UROP/plot_output/IndividualFollowUp/2020efe/"
+    (t,i,e, label, sector, 
+     discdate, gal_mags, info) = mcmc_load_one(datapath, savepath, 
+                                              runproduce = False)
+    galmag = 20.44
+    extinction = 0.025
+    z = info["Z"][0]
+    badIndexes = np.concatenate((np.arange(0,100), np.arange(628,641)))
+    binT, binI, binE, absT, absI, absE = sp.plot_SN_LCs(savepath, t,i,e,label,
+                                                    sector,galmag,extinction,
+                                                    z, discdate, badIndexes)
+
+    #standardize to 1
+    standI, standE = du.flux_standardized(binI, binE)
+    return (datapath, savepath,t,i,e, label, sector, discdate, gal_mags, 
+            info, binT, binI, binE, absT, absI, absE, standI, standE) 
 def mcmc_load_lygos(datapath, savepath, runproduce = False):
     """ Opens all Lygos files and loads them in.
     label_use = 1: filenames like: rflxtarg_2018eod_0114_30mn.csv
@@ -1139,41 +1219,198 @@ def run_all_discdate(path, all_t, all_i, all_e, all_labels, sector_list,
 
     return
 
-def retry_endofsectorlist(path, use_labels, all_t, all_i, all_e, all_labels, sector_list, 
-                        discovery_dictionary, t_starts, best_params_file,
-                        ID_file, upper_errors_file, lower_errors_file,
-                        quaternion_folder = "/users/conta/urop/quaternions/", 
-                        CBV_folder = "C:/Users/conta/.eleanor/metadata/"):
+def double_powerlaw(path, targetlabel, t, intensity, error, sector,
+                     disctime, plot = True, n1=20000, n2=40000):
+    """ Runs MCMC fitting for stepped power law fit
+    This is the fitting that matches: Shappee 2019
+    fireball power law with A, beta, B, and t0 floated
+    h(t-t_1)^a1 + B from t1 <= t <= t2
+    h(t - t_1)^a1 + h(t-t_2)^a2 + B from t_2 <= t
+    Runs two separate chains to hopefully hit convergence
+    Params:
+            - path to save into
+            - targetlabel for file names
+            - time axis
+            - intensities
+            - errors
+            - sector number 
+            - discovery time
+            - plot (true/false)
+            - n1 = steps in first chain
+            - n2 = steps in second chain
     
-    no_data = []
-    with open(best_params_file, 'a') as f:
-        f.write("t0,A,beta,B,cQ,CBV1,CBV2,CBV3\n")
-    with open(upper_errors_file, 'a') as f:
-        f.write("t0,A,beta,B,cQ,CBV1,CBV2,CBV3\n")
-    with open(lower_errors_file, 'a') as f:
-        f.write("t0,A,beta,B,cQ,CBV1,CBV2,CBV3\n")
-    with open(ID_file, 'a') as p:
-        p.write("ID\n")
+    """
+    def func1(x, t1, t2, a1, a2, B1, B2):
+        return B1 *(x-t1)**a1
+    def func2(x, t1, t2, a1, a2, B1, B2):
+        return B1 * (x-t1)**a1 + B2 * (x-t2)**a2
     
-    for i in range(len(use_labels)):
-        id_ = use_labels[i] #full string for one to look for
-        try:
-            n = all_labels.index(id_) #position in big list
-            s = int(use_labels[i][-4:-2]) + 1 #get current sector + 1
-            #if the next label in the list 
-            if (all_labels[n+1].startswith(id_[:-4] + str(s))): #if the next label is the next sector
-                n = n+1
-                #key = all_labels[n]
-                sn.stepped_powerlaw(path, all_labels[n], all_t[n], all_i[n],
-                                     all_e[n], sector_list[n], discovery_dictionary, 
-                                     t_starts, best_params_file,ID_file, 
-                                     upper_errors_file, lower_errors_file,plot = True, 
-                                    quaternion_folder = "/users/conta/urop/quaternions/", 
-                                    CBV_folder = "C:/Users/conta/.eleanor/metadata/")
-            else: #next one is not hte next sector
-                no_data.append(id_)
-                print('nothing on', id_)
-        except ValueError:
-            print("not in list")
+    def log_likelihood(theta, x, y, yerr):
+        """ calculates the log likelihood function. 
+        constrain beta between 0.5 and 4.0
+        A is positive
+        only fit up to 40% of the flux"""
+        #t1, t2,a1, a2, B1, B2, C = theta 
+        a1, a2, B1, B2, C = theta 
+        t1 = 1917.01641
+        t2 = 1919.68304
+    
+        model = np.piecewise(x, [(t1 <= x)*(x < t2), t2 <= x], 
+                             [func1, func2],
+                             t1, t2, a1, a2, B1, B2) + C
+       
+        
+        yerr2 = yerr**2.0
+        returnval = -0.5 * np.nansum((y - model) ** 2 / yerr2 + np.log(yerr2))
+        return returnval
+    
+    def log_prior(theta, disctime):
+        """ calculates the log prior value """
+        #t1, t2, a1, a2, B1, B2, C = theta 
+        a1, a2, B1, B2, C = theta 
+        if (# (disctime-2)<t1<(disctime+2) and (t1+2) < t2 < (disctime+4.5) and
+            0.5 < a1 < 6.0 and 0.5 < a2 < 6.0
+            and 1 > B1 > 0 and 1 > B2 > 0 and -5 < C < 5):
+            return 0.0
+        return -np.inf
+        
+        #log probability
+    def log_probability(theta, x, y, yerr, disctime):
+        """ calculates log probabilty"""
+        lp = log_prior(theta,disctime)
+            
+        if not np.isfinite(lp) or np.isnan(lp): #if lp is not 0.0
+            return -np.inf
+        
+        return lp + log_likelihood(theta, x, y, yerr)
+    
+    import matplotlib.pyplot as plt
+    import emcee
+    rcParams['figure.figsize'] = 16,6
+     
+    x = t
+    y = intensity
+    yerr = error
+    
+    #running MCMC
+    np.random.seed(42)   
+    nwalkers = 32
+    #ndim = 7
+    #labels = ["t1", "t2", "a1", "a2", "B1", "B2", "C"] # YYY
+    ndim = 5
+    labels = ["a1", "a2", "B1", "B2", "C"]
+    
+    
+    p0 = np.zeros((nwalkers, ndim)) 
+    for n in range(len(p0)):
+        #p0[n] = np.array((disctime+1, disctime+2, 1, 1, 0.2, 0.2, 0.2)) 
+        p0[n] = np.array(( 1, 1, 0.2, 0.2, 0.2)) 
 
-    return no_data
+    #p0 += (np.array((0.1,0.1,0.1, 0.1, 0.1, 0.1,0.1)) * np.random.rand(nwalkers,ndim))
+    p0 += (np.array((0.1, 0.1, 0.1, 0.1,0.1)) * np.random.rand(nwalkers,ndim))
+    
+    sampler = emcee.EnsembleSampler(nwalkers, ndim, log_probability, 
+                                    args=(x, y, yerr, disctime))
+    
+   # run ONCE
+    sampler.run_mcmc(p0, n1, progress=True)
+    sampler.get_chain()
+    if plot:
+        samples = sampler.get_chain()
+        plot_chain(path, targetlabel, "-burn-in-plot-intermediate.png", samples, labels, ndim)
+    
+    
+    flat_samples = sampler.get_chain(discard=6000, thin=15, flat=True)
+    
+    #get intermediate best
+    best_mcmc_inter = np.zeros((1,ndim))
+    for i in range(ndim):
+        mcmc = np.percentile(flat_samples[:, i], [16, 50, 84])
+        best_mcmc_inter[0][i] = mcmc[1]
+        
+
+    #reset p0 and run again
+    np.random.seed(50)
+    p0 = np.zeros((nwalkers, ndim))
+    for i in range(nwalkers):
+        p0[i] = best_mcmc_inter[0] + 0.1 * np.random.rand(1, ndim)
+       
+    #sampler.reset()
+    sampler.run_mcmc(p0,n2, progress = True)
+    if plot:
+        samples = sampler.get_chain()
+        plot_chain(path, targetlabel, "-burn-in-plot-final.png", samples[n1:], labels, ndim)
+    
+    flat_samples = sampler.get_chain(discard=1000, thin=15, flat=True)
+    #print(len(flat_samples), "samples post second run")
+
+    #print out the best fit params based on 16th, 50th, 84th percentiles
+    best_mcmc = np.zeros((1,ndim))
+    upper_error = np.zeros((1,ndim))
+    lower_error = np.zeros((1,ndim))
+    for i in range(ndim):
+        mcmc = np.percentile(flat_samples[:, i], [16, 50, 84])
+        q = np.diff(mcmc)
+        print(labels[i], mcmc[1], -1 * q[0], q[1] )
+        best_mcmc[0][i] = mcmc[1]
+        upper_error[0][i] = q[1]
+        lower_error[0][i] = q[0]
+ 
+    
+    if plot:
+        import corner
+        fig = corner.corner(
+            flat_samples, labels=labels,
+            quantiles = [0.16, 0.5, 0.84],
+                           show_titles=True,title_fmt = ".4f", 
+                           title_kwargs={"fontsize": 12}
+        );
+        fig.savefig(path + targetlabel + 'corner-plot-params.png')
+        plt.show()
+        plt.close()
+         
+        #best fit model
+        #t1 = best_mcmc[0][0] 
+        t1 = 1917.01641
+        #t2 = best_mcmc[0][1]
+        t2 = 1919.68304
+        a1 = best_mcmc[0][0]
+        a2 = best_mcmc[0][1] 
+        B1 = best_mcmc[0][2]
+        B2 = best_mcmc[0][3]
+        C = best_mcmc[0][4]
+        
+        best_fit_model = model = np.piecewise(x, [(t1 <= x)*(x < t2), t2 <= x], 
+                             [func1, func2],
+                             t1, t2, a1, a2, B1, B2) + C
+        
+        nrows = 2
+        ncols = 1
+        fig, ax = plt.subplots(nrows, ncols, sharex=True,
+                                       figsize=(8*ncols * 2, 3*nrows * 2))
+        
+        ax[0].plot(x, best_fit_model, label="best fit model", color = 'red')
+        ax[0].scatter(x, y, label = "FFI data", s = 5, color = 'black')
+        for n in range(nrows):
+            ax[n].axvline(t1, color = 'blue', label="t1")
+            ax[n].axvline(t2, color = "pink", label = "t2")
+            ax[n].axvline(disctime, color = 'green', label="discovery time")
+            ax[n].set_ylabel("Rel. Flux")
+            
+        #main
+        ax[0].set_title(targetlabel)
+        ax[0].legend(fontsize=8, loc="upper left")
+        ax[nrows-1].set_xlabel("BJD-2457000")
+        
+        #residuals
+        ax[1].set_title("Residual (y-model)")
+        residuals = y - best_fit_model
+        ax[1].scatter(x,residuals, s=5, color = 'black', label='residual')
+        ax[1].axhline(0,color='purple', label="zero")
+        ax[1].legend()
+        
+        plt.savefig(path + targetlabel + "-MCMCmodel-double-powerlaw.png")
+        
+    
+    sn.beep()
+    return flat_samples, best_mcmc, upper_error, lower_error

@@ -92,7 +92,7 @@ output = "C:/Users/conta/UROP/all_crosschecks/ACTUAL/WTV_crossmatch.csv"
 WTV_values = pd.read_csv("C:/Users/conta/UROP/all_crosschecks/ACTUAL/wtv_output.csv",skiprows=61)
 conf = sn.process_WTV_results(sn_list_cleaned, WTV_values, output)
 
-#%% Running all fitting:
+#%% Running all fitting: !!! THIS IS DEFUNCT
     #%% disco priors
 import sn_functions as sn
 

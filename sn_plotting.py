@@ -15,9 +15,10 @@ def plot_mcmc(path, x, y, targetlabel, disctime, best_mcmc, flat_samples,
     fig = corner.corner(
         flat_samples, labels=labels,
         quantiles = [0.16, 0.5, 0.84],
-                       show_titles=True,title_fmt = ".4f", 
-                       title_kwargs={"fontsize": 12}
+                       show_titles=True, title_fmt = ".4f", 
+                       title_kwargs={"fontsize": 16}
     );
+    plt.tight_layout()
     fig.savefig(path + targetlabel + 'corner-plot-params.png')
     plt.show()
     plt.close()
@@ -42,20 +43,21 @@ def plot_mcmc(path, x, y, targetlabel, disctime, best_mcmc, flat_samples,
     for n in range(nrows):
         ax[n].axvline(best_mcmc[0][0], color = 'blue', label="t0")
         ax[n].axvline(disctime, color = 'green', label="discovery time")
-        ax[n].set_ylabel("Rel. Flux")
+        ax[n].set_ylabel("Rel. Flux", fontsize=12)
         
     #main
     ax[0].set_title(targetlabel)
-    ax[0].legend(fontsize=8, loc="upper left")
-    ax[nrows-1].set_xlabel("BJD-2457000")
+    ax[0].legend(fontsize=10, loc="upper left")
+    ax[nrows-1].set_xlabel("BJD-2457000", fontsize=12)
     
     #residuals
-    ax[1].set_title("Residual (y-model)")
+    ax[1].set_title("Residual (y-model)", fontsize=12)
     residuals = y - best_fit_model
     ax[1].scatter(x,residuals, s=5, color = 'black', label='residual')
     ax[1].axhline(0,color='purple', label="zero")
     ax[1].legend()
     
+    plt.tight_layout()
     plt.savefig(path + targetlabel + "-MCMCmodel-stepped-powerlaw.png")
     return
 
@@ -154,14 +156,14 @@ def plot_SN_LCs(path, t,i,e,label,sector,galmag,extinction, z,
                    ecolor=ecoll, zorder=1)
     
     #ax[0].axhline(1, color='orchid', label='Lygos Background')
-    ax[0].set_ylabel("Rel. Flux")
-    ax[0].set_title(label)
+    ax[0].set_ylabel("Rel. Flux", fontsize=16)
+    ax[0].set_title(label, fontsize=18)
     
     #row 1: binned and cleaned up flux.
-    ax[1].set_title("Binned Flux")
+    ax[1].set_title("Binned Flux", fontsize=16)
     ax[1].errorbar(binT, binI, yerr=binE, fmt = 'o', label = "Binned and Cleaned",
                    color = 'blue', ecolor = "blue", markersize = 5)
-    ax[1].set_ylabel("Rel. Flux")
+    ax[1].set_ylabel("Rel. Flux", fontsize=16)
     
     #row 2: apparent TESS magnitude
     (absT, absI, absE, absGalmag,
@@ -171,8 +173,8 @@ def plot_SN_LCs(path, t,i,e,label,sector,galmag,extinction, z,
     
     ax[2].errorbar(absT, apparentM, yerr=apparentE, fmt = 'o', 
                    color = 'darkslateblue', ecolor='slateblue', markersize=5)
-    ax[2].set_title("Apparent TESS Magnitude")
-    ax[2].set_ylabel("Apparent Mag.")
+    ax[2].set_title("Apparent TESS Magnitude", fontsize=16)
+    ax[2].set_ylabel("Apparent Mag.", fontsize=16)
     ax[2].invert_yaxis()
     
     #row 3: absolute magntiude conversion
@@ -182,17 +184,17 @@ def plot_SN_LCs(path, t,i,e,label,sector,galmag,extinction, z,
                    ecolor='lavender', markersize=5)
     #ax[3].axhline(absGalmag, color = 'orchid',label="background mag." )
     ax[3].invert_yaxis()
-    ax[3].set_title("Absolute Magnitude Converted")
-    ax[3].set_ylabel("Abs. Magnitude")
+    ax[3].set_title("Absolute Magnitude Converted", fontsize=16)
+    ax[3].set_ylabel("Abs. Magnitude", fontsize=16)
     
     for i in range(nrows):
         ax[i].axvline(discdate, color = 'black', 
                       label="discovery time")
         
-        ax[i].legend(loc="upper left")
+        ax[i].legend(loc="upper left", fontsize=12)
         
         
-    ax[nrows-1].set_xlabel("BJD-2457000")
+    ax[nrows-1].set_xlabel("BJD-2457000", fontsize=16)
     
     plt.tight_layout()
     plt.savefig(path + label + "flux-plot.png")
